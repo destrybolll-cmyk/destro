@@ -717,7 +717,8 @@ async def handle_callback(callback: CallbackQuery):
             except Exception:
                 pass
             await callback.answer("✅ Игра началась!")
-            await send_ttt_game(non_admin_id, challenge_anon_id, ADMIN_ID, board, "X")
+            g = games[non_admin_id]
+            await send_ttt_game(non_admin_id, challenge_anon_id, ADMIN_ID, g["board"], "X")
             return
 
         # ── Instant rematch (after finished game) ──
