@@ -167,6 +167,7 @@ async def cmd_help(message: Message):
             "   <code>/history 30</code> — за 30 минут\n\n"
             "📊 <b>Статистика</b> — статистика бота\n\n"
             "👥 <b>Список</b> — список пользователей\n\n"
+            "🔍 <code>/find @user</code> — найти/добавить пользователя\n\n"
             "📢 <b>Рассылка</b> — написать всем\n\n"
             "❌ <b>Отмена</b> — отменить текущее действие",
             reply_markup=admin_cmds_keyboard(),
@@ -384,6 +385,43 @@ async def cmd_user(message: Message):
     kb.adjust(1)
 
     await message.answer(text, reply_markup=kb.as_markup())
+
+
+@dp.message(Command("find"))
+async def cmd_find(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        await message.answer("❌ Используй: <code>/find @username</code>")
+        return
+    username = args[1].lstrip("@")
+    try:
+        chat = await message.bot.get_chat(f"@{username}")
+        uid = chat.id
+        name = chat.first_name or ""
+        uname = chat.username or ""
+        existing = db.get_user(uid)
+        if existing:
+            anon_id = existing["id"]
+            await message.answer(
+                f"✅ Пользователь @{uname} уже в БД.\n"
+                f"🆔 Анонимный ID: <b>#{anon_id}</b>\n"
+                f"👤 {esc(name)}"
+            )
+        else:
+            anon_id, _ = db.add_user(uid, name, uname, chat.language_code or "")
+            await message.answer(
+                f"✅ Пользователь @{uname} добавлен в БД!\n"
+                f"🆔 Анонимный ID: <b>#{anon_id}</b>\n"
+                f"👤 {esc(name)}"
+            )
+    except Exception as e:
+        await message.answer(
+            f"❌ Не удалось найти @{username}.\n"
+            "Пользователь должен написать боту хотя бы раз.\n"
+            f"<code>{esc(str(e)[:200])}</code>"
+        )
 
 
 @dp.message(Command("broadcast"))
