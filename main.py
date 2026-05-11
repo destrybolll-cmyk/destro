@@ -655,6 +655,14 @@ async def handle_callback(callback: CallbackQuery):
             pending_ttt.pop(ADMIN_ID, None)
             pending_ttt.pop(non_admin_id, None)
 
+            # Notify admin when user accepts
+            if challenger_id == ADMIN_ID:
+                # User accepted admin's challenge
+                await bot.send_message(ADMIN_ID, f"✅ Пользователь #<b>{challenge_anon_id}</b> принял вызов! Игра начинается...")
+            else:
+                # Admin accepted user's challenge
+                await bot.send_message(challenger_id, "✅ Cookie принял ваш вызов! Игра начинается...")
+
             try:
                 await callback.message.edit_text(
                     callback.message.html_text + "\n\n✅ Вызов принят!",
@@ -677,16 +685,16 @@ async def handle_callback(callback: CallbackQuery):
             challenger_id = callback.from_user.id
             challenged_id = ADMIN_ID if challenger_id != ADMIN_ID else target_user_id
 
-            if challenger_id != ADMIN_ID and challenger_id in games:
+            if challenger_id in games:
                 await callback.answer("❌ Вы уже в игре.", show_alert=True)
                 return
-            if challenger_id != ADMIN_ID and games:
+            if games:
                 await callback.answer("🍪 Cookie сейчас занят игрой. Попробуйте позже.", show_alert=True)
                 return
             if challenged_id in pending_ttt:
                 await callback.answer("❌ Этому игроку уже отправлен вызов.", show_alert=True)
                 return
-            if challenged_id != ADMIN_ID and challenged_id in games:
+            if challenged_id in games:
                 await callback.answer("❌ Пользователь уже в игре.", show_alert=True)
                 return
 
@@ -705,6 +713,7 @@ async def handle_callback(callback: CallbackQuery):
                 except Exception:
                     await callback.answer("❌ Пользователь недоступен.", show_alert=True)
                     return
+                await callback.message.answer(f"🎮 Вызов отправлен пользователю #<b>{anon_id}</b>. Ожидайте ответа...")
             else:
                 try:
                     await bot.send_message(
