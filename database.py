@@ -110,6 +110,13 @@ class Database:
             ).fetchone()
             return result["user_id"] if result else None
 
+    def get_anon_id_by_user_id(self, user_id: int) -> Optional[int]:
+        with self._get_conn() as conn:
+            result = conn.execute(
+                "SELECT id FROM users WHERE user_id = ?", (user_id,)
+            ).fetchone()
+            return result["id"] if result else None
+
     def get_all_users(self):
         with self._get_conn() as conn:
             return conn.execute(
