@@ -764,9 +764,39 @@ async def handle_user_message(message: Message):
     waiting_messages[user_id] = wait_msg.message_id
 
 
+# ────────── Healthcheck HTTP server (for platform keep-alive) ─────
+
+async def handle_healthcheck(reader, writer):
+    request = await reader.read(2048)
+    if b"GET /health" in request or b"GET / " in request:
+        resp = (
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/plain\r\n"
+            "Content-Length: 2\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+            "OK"
+        )
+    else:
+        resp = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    writer.write(resp.encode())
+    await writer.drain()
+    writer.close()
+
+
+async def run_healthcheck():
+    server = await asyncio.start_server(
+        handle_healthcheck, host="0.0.0.0", port=8080
+    )
+    logging.info("🩺 Healthcheck server on :8080")
+    async with server:
+        await server.serve_forever()
+
+
 # ────────────────────────────── Entry ──────────────────────────────
 
 async def main():
+    healthcheck_task = asyncio.create_task(run_healthcheck())
     while True:
         try:
             logging.info("🚀 Бот запущен!")
