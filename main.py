@@ -26,6 +26,90 @@ add_user_step: bool = False
 # Track "rename user" flow
 rename_anon_id: int | None = None
 
+# Tic-Tac-Toe games: key = user_id, value = game state
+games: dict[int, dict] = {}
+
+
+def make_ttt_board(board: list[list[str]], anon_id: int, finished: bool = False) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for r in range(3):
+        row_btns = []
+        for c in range(3):
+            cell = board[r][c]
+            if cell == "X":
+                row_btns.append(InlineKeyboardButton(text="❌", callback_data="none"))
+            elif cell == "O":
+                row_btns.append(InlineKeyboardButton(text="⭕", callback_data="none"))
+            else:
+                row_btns.append(InlineKeyboardButton(text="⬜", callback_data=f"ttt:move:{anon_id}:{r}:{c}"))
+        kb.row(*row_btns)
+    if finished:
+        kb.row(InlineKeyboardButton(text="🔄 Играть ещё", callback_data=f"ttt:new:{anon_id}"))
+    return kb.as_markup()
+
+
+def check_ttt_winner(board: list[list[str]]) -> str | None:
+    for i in range(3):
+        if board[i][0] == board[i][1] == board[i][2] != " ":
+            return board[i][0]
+        if board[0][i] == board[1][i] == board[2][i] != " ":
+            return board[0][i]
+    if board[0][0] == board[1][1] == board[2][2] != " ":
+        return board[0][0]
+    if board[0][2] == board[1][1] == board[2][0] != " ":
+        return board[0][2]
+    return None
+
+
+async def send_ttt_game(target_user_id: int, anon_id: int, admin_id: int, board: list[list[str]], current: str, game_over: bool = False):
+    board_markup = make_ttt_board(board, anon_id, finished=game_over)
+    admin_label = f"🎮 <b>Крестики-нолики</b> с пользователем #<b>{anon_id}</b>\n"
+    user_label = f"🎮 <b>Крестики-нолики</b> с {ADMIN_NAME}\n"
+
+    if game_over:
+        winner = check_ttt_winner(board)
+        if winner == "X":
+            admin_label += "\n🏆 <b>Вы выиграли!</b>"
+            user_label += "\n😞 <b>Вы проиграли.</b>"
+        elif winner == "O":
+            admin_label += "\n😞 <b>Вы проиграли.</b>"
+            user_label += "\n🏆 <b>Вы выиграли!</b>"
+        else:
+            admin_label += "\n🤝 <b>Ничья!</b>"
+            user_label += "\n🤝 <b>Ничья!</b>"
+    else:
+        turn = "Ваш ход" if (current == "X" and admin_id == ADMIN_ID) or (current == "O" and admin_id != ADMIN_ID) else "Ход соперника"
+        admin_label += f"\n{('❌' if current == 'X' else '⭕')} {turn}"
+        user_label += f"\n{('❌' if current == 'X' else '⭕')} {'Ваш ход' if current == 'O' else 'Ход соперника'}"
+
+    game = games.get(target_user_id)
+    admin_msg_id = game["admin_msg_id"] if game else None
+    user_msg_id = game["user_msg_id"] if game else None
+
+    if admin_msg_id:
+        try:
+            await Bot.get_current().edit_message_text(admin_label, chat_id=admin_id, message_id=admin_msg_id, reply_markup=board_markup)
+        except Exception:
+            msg = await Bot.get_current().send_message(admin_id, admin_label, reply_markup=board_markup)
+            if game:
+                game["admin_msg_id"] = msg.message_id
+    else:
+        msg = await Bot.get_current().send_message(admin_id, admin_label, reply_markup=board_markup)
+        if game:
+            game["admin_msg_id"] = msg.message_id
+
+    if user_msg_id:
+        try:
+            await Bot.get_current().edit_message_text(user_label, chat_id=target_user_id, message_id=user_msg_id, reply_markup=board_markup)
+        except Exception:
+            msg = await Bot.get_current().send_message(target_user_id, user_label, reply_markup=board_markup)
+            if game:
+                game["user_msg_id"] = msg.message_id
+    else:
+        msg = await Bot.get_current().send_message(target_user_id, user_label, reply_markup=board_markup)
+        if game:
+            game["user_msg_id"] = msg.message_id
+
 # Track waiting messages: user_id -> message_id of "подождите" message
 waiting_messages: dict[int, int] = {}
 
@@ -419,6 +503,7 @@ async def cmd_user(message: Message):
         kb.button(text="✅ Разблокировать", callback_data=f"unban:{anon_id}")
     else:
         kb.button(text="🚫 Заблокировать", callback_data=f"ban:{anon_id}")
+    kb.button(text="🎮 Крестики-нолики", callback_data=f"ttt:new:{anon_id}")
     kb.button(text="🗑 Удалить", callback_data=f"del_ask:{anon_id}")
     kb.adjust(1)
 
@@ -504,12 +589,61 @@ async def cmd_history(message: Message):
 @dp.callback_query()
 async def handle_callback(callback: CallbackQuery):
     global admin_pending_reply, write_flow_step, write_flow_anon_id, rename_anon_id
+
+    parts = callback.data.split(":")
+    action = parts[0]
+
+    # Allow both admin and user to play TTT
+    if action == "ttt":
+        anon_id = int(parts[2])
+        target_user_id = db.get_user_id_by_anon(anon_id)
+        if target_user_id is None:
+            await callback.answer("❌ Ошибка.", show_alert=True)
+            return
+        sub = parts[1]
+        if sub == "new":
+            await callback.answer()
+            board = [[" ", " ", " "] for _ in range(3)]
+            games[target_user_id] = {
+                "board": board,
+                "current": "X",
+                "anon_id": anon_id,
+                "admin_msg_id": None,
+                "user_msg_id": None,
+            }
+            await send_ttt_game(target_user_id, anon_id, ADMIN_ID, board, "X")
+        elif sub == "move":
+            r, c = int(parts[3]), int(parts[4])
+            game = games.get(target_user_id)
+            if game is None:
+                await callback.answer("❌ Игра не найдена.", show_alert=True)
+                return
+            board = game["board"]
+            player = callback.from_user.id
+            expected = "X" if player == ADMIN_ID else "O"
+            if game["current"] != expected:
+                await callback.answer("⛔ Сейчас не твой ход!", show_alert=True)
+                return
+            if board[r][c] != " ":
+                await callback.answer("❌ Клетка занята!", show_alert=True)
+                return
+            board[r][c] = expected
+            winner = check_ttt_winner(board)
+            if winner or all(board[i][j] != " " for i in range(3) for j in range(3)):
+                await send_ttt_game(target_user_id, anon_id, ADMIN_ID, board, game["current"], game_over=True)
+                if target_user_id in games:
+                    del games[target_user_id]
+            else:
+                game["current"] = "O" if expected == "X" else "X"
+                await send_ttt_game(target_user_id, anon_id, ADMIN_ID, board, game["current"])
+            await callback.answer()
+        return
+
     if not is_admin(callback.from_user.id):
         await callback.answer(f"❌ Только для {ADMIN_NAME}.", show_alert=True)
         return
 
-    action, anon_id_str = callback.data.split(":")
-    anon_id = int(anon_id_str)
+    anon_id = int(parts[1])
     target_user_id = db.get_user_id_by_anon(anon_id)
 
     if target_user_id is None:
@@ -558,6 +692,7 @@ async def handle_callback(callback: CallbackQuery):
             kb.button(text="✅ Разблокировать", callback_data=f"unban:{anon_id}")
         else:
             kb.button(text="🚫 Заблокировать", callback_data=f"ban:{anon_id}")
+        kb.button(text="🎮 Крестики-нолики", callback_data=f"ttt:new:{anon_id}")
         kb.button(text="🗑 Удалить", callback_data=f"del_ask:{anon_id}")
         kb.adjust(1)
         await callback.message.answer(text, reply_markup=kb.as_markup())
@@ -634,6 +769,8 @@ async def handle_callback(callback: CallbackQuery):
             await callback.message.delete()
         except Exception:
             pass
+
+
 
     elif action == "none":
         await callback.answer()
