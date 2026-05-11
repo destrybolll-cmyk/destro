@@ -99,7 +99,7 @@ async def send_ttt_game(target_user_id: int, anon_id: int, admin_id: int, board:
     user_stats = db.get_ttt_stats(target_user_id)
 
     def make_label(opponent: str, stats: dict, is_admin_view: bool) -> str:
-        lines = [f"🎮 <b>Крестики-нолики</b>", f"Противник: {opponent}\n", f"<code>{board_view}</code>\n"]
+        lines = [f"🎮 <b>Крестики-нолики</b>", f"Противник: {opponent}\n", f"<pre>{board_view}</pre>\n"]
         if game_over:
             winner = check_ttt_winner(board)
             if winner == "X":
@@ -121,29 +121,27 @@ async def send_ttt_game(target_user_id: int, anon_id: int, admin_id: int, board:
     admin_msg_id = game["admin_msg_id"] if game else None
     user_msg_id = game["user_msg_id"] if game else None
 
-    if admin_msg_id:
+    async def send_or_update(msg_id, chat_id, label, markup):
+        if msg_id:
+            try:
+                await bot.edit_message_text(label, chat_id=chat_id, message_id=msg_id, reply_markup=markup)
+                return msg_id
+            except Exception:
+                pass
         try:
-            await Bot.get_current().edit_message_text(admin_label, chat_id=admin_id, message_id=admin_msg_id, reply_markup=board_markup)
-        except Exception:
-            msg = await Bot.get_current().send_message(admin_id, admin_label, reply_markup=board_markup)
-            if game:
-                game["admin_msg_id"] = msg.message_id
-    else:
-        msg = await Bot.get_current().send_message(admin_id, admin_label, reply_markup=board_markup)
-        if game:
-            game["admin_msg_id"] = msg.message_id
+            msg = await bot.send_message(chat_id, label, reply_markup=markup)
+            return msg.message_id
+        except Exception as e:
+            logging.warning(f"TTT send failed to {chat_id}: {e}")
+            return None
 
-    if user_msg_id:
-        try:
-            await Bot.get_current().edit_message_text(user_label, chat_id=target_user_id, message_id=user_msg_id, reply_markup=board_markup)
-        except Exception:
-            msg = await Bot.get_current().send_message(target_user_id, user_label, reply_markup=board_markup)
-            if game:
-                game["user_msg_id"] = msg.message_id
-    else:
-        msg = await Bot.get_current().send_message(target_user_id, user_label, reply_markup=board_markup)
-        if game:
-            game["user_msg_id"] = msg.message_id
+    new_admin_msg_id = await send_or_update(admin_msg_id, admin_id, admin_label, board_markup)
+    new_user_msg_id = await send_or_update(user_msg_id, target_user_id, user_label, board_markup)
+    if game:
+        if new_admin_msg_id:
+            game["admin_msg_id"] = new_admin_msg_id
+        if new_user_msg_id:
+            game["user_msg_id"] = new_user_msg_id
 
 # Track waiting messages: user_id -> message_id of "подождите" message
 waiting_messages: dict[int, int] = {}
