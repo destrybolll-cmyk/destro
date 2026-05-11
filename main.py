@@ -2,6 +2,7 @@ import asyncio
 import logging
 import html
 import os
+import random
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -75,6 +76,20 @@ def ttt_main_menu_markup() -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
+def init_ttt_game(non_admin_id: int, anon_id: int) -> dict:
+    admin_symbol = random.choice(["X", "O"])
+    user_symbol = "O" if admin_symbol == "X" else "X"
+    return {
+        "board": [[" ", " ", " "] for _ in range(3)],
+        "current": "X",
+        "anon_id": anon_id,
+        "admin_msg_id": None,
+        "user_msg_id": None,
+        "admin_symbol": admin_symbol,
+        "user_symbol": user_symbol,
+    }
+
+
 def check_ttt_winner(board: list[list[str]]) -> str | None:
     for i in range(3):
         if board[i][0] == board[i][1] == board[i][2] != " ":
@@ -98,18 +113,24 @@ async def send_ttt_game(target_user_id: int, anon_id: int, admin_id: int, board:
     admin_stats = db.get_ttt_stats(admin_id)
     user_stats = db.get_ttt_stats(target_user_id)
 
+    game = games.get(target_user_id)
+    admin_symbol = game["admin_symbol"] if game else "X"
+    user_symbol = game["user_symbol"] if game else "O"
+
     def make_label(opponent: str, stats: dict, is_admin_view: bool) -> str:
+        my_sym = admin_symbol if is_admin_view else user_symbol
+        opp_sym = user_symbol if is_admin_view else admin_symbol
         lines = [f"🎮 <b>Крестики-нолики</b>", f"Противник: {opponent}\n", f"<pre>{board_view}</pre>\n"]
         if game_over:
             winner = check_ttt_winner(board)
-            if winner == "X":
-                lines.append("🏆 <b>Вы выиграли!</b>" if is_admin_view else "😞 <b>Вы проиграли.</b>")
-            elif winner == "O":
-                lines.append("😞 <b>Вы проиграли.</b>" if is_admin_view else "🏆 <b>Вы выиграли!</b>")
+            if winner == my_sym:
+                lines.append("🏆 <b>Вы выиграли!</b>")
+            elif winner == opp_sym:
+                lines.append("😞 <b>Вы проиграли.</b>")
             else:
                 lines.append("🤝 <b>Ничья!</b>")
         else:
-            my_turn = (current == "X" and is_admin_view) or (current == "O" and not is_admin_view)
+            my_turn = (current == my_sym)
             lines.append(f"{'❌' if current == 'X' else '⭕'} {'<b>Ваш ход</b>' if my_turn else 'Ход соперника'}")
         lines.append(f"\n📊 Счёт: {stats['wins']}🏆 {stats['losses']}😞 {stats['draws']}🤝")
         return "\n".join(lines)
@@ -117,7 +138,6 @@ async def send_ttt_game(target_user_id: int, anon_id: int, admin_id: int, board:
     admin_label = make_label(admin_opponent, admin_stats, True)
     user_label = make_label(user_opponent, user_stats, False)
 
-    game = games.get(target_user_id)
     admin_msg_id = game["admin_msg_id"] if game else None
     user_msg_id = game["user_msg_id"] if game else None
 
@@ -673,14 +693,7 @@ async def handle_callback(callback: CallbackQuery):
                 await callback.answer("❌ Игрок уже в игре.", show_alert=True)
                 return
 
-            board = [[" ", " ", " "] for _ in range(3)]
-            games[non_admin_id] = {
-                "board": board,
-                "current": "X",
-                "anon_id": challenge_anon_id,
-                "admin_msg_id": None,
-                "user_msg_id": None,
-            }
+            games[non_admin_id] = init_ttt_game(non_admin_id, challenge_anon_id)
             # Clean stale pending challenges for both participants
             pending_ttt.pop(ADMIN_ID, None)
             pending_ttt.pop(non_admin_id, None)
@@ -712,14 +725,9 @@ async def handle_callback(callback: CallbackQuery):
                 await callback.answer("❌ Ошибка.", show_alert=True)
                 return
 
-            board = [[" ", " ", " "] for _ in range(3)]
-            games[target_user_id] = {
-                "board": board,
-                "current": "X",
-                "anon_id": anon_id,
-                "admin_msg_id": None,
-                "user_msg_id": None,
-            }
+            games[target_user_id] = init_ttt_game(target_user_id, anon_id)
+            g = games[target_user_id]
+            board = g["board"]
             await callback.answer()
             await send_ttt_game(target_user_id, anon_id, ADMIN_ID, board, "X")
             return
@@ -907,7 +915,7 @@ async def handle_callback(callback: CallbackQuery):
                 return
             board = game["board"]
             player = callback.from_user.id
-            expected = "X" if player == ADMIN_ID else "O"
+            expected = game["admin_symbol"] if player == ADMIN_ID else game["user_symbol"]
             if game["current"] != expected:
                 await callback.answer("⛔ Сейчас не твой ход!", show_alert=True)
                 return
@@ -918,12 +926,13 @@ async def handle_callback(callback: CallbackQuery):
             winner = check_ttt_winner(board)
             if winner or all(board[i][j] != " " for i in range(3) for j in range(3)):
                 await send_ttt_game(target_user_id, anon_id, ADMIN_ID, board, game["current"], game_over=True)
-                if winner == "X":
-                    db.update_ttt_stats(ADMIN_ID, "win")
-                    db.update_ttt_stats(target_user_id, "loss")
-                elif winner == "O":
-                    db.update_ttt_stats(ADMIN_ID, "loss")
-                    db.update_ttt_stats(target_user_id, "win")
+                if winner:
+                    if winner == game["admin_symbol"]:
+                        db.update_ttt_stats(ADMIN_ID, "win")
+                        db.update_ttt_stats(target_user_id, "loss")
+                    else:
+                        db.update_ttt_stats(ADMIN_ID, "loss")
+                        db.update_ttt_stats(target_user_id, "win")
                 else:
                     db.update_ttt_stats(ADMIN_ID, "draw")
                     db.update_ttt_stats(target_user_id, "draw")
