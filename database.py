@@ -116,6 +116,12 @@ class Database:
                 "SELECT * FROM users ORDER BY last_active DESC"
             ).fetchall()
 
+    def get_banned_users(self):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM users WHERE is_banned = 1 ORDER BY last_active DESC"
+            ).fetchall()
+
     def save_message(self, user_id: int, anon_id: int, text: str, direction: str = "user_to_admin"):
         with self._get_conn() as conn:
             conn.execute(

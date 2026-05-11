@@ -352,6 +352,33 @@ async def cmd_list(message: Message):
     await message.answer(text, reply_markup=markup)
 
 
+def banned_users_list():
+    users = db.get_banned_users()
+    if not users:
+        return "🚫 <b>Нет заблокированных пользователей.</b>", None
+    kb = InlineKeyboardBuilder()
+    for u in users:
+        name = esc(u["first_name"] or "—")
+        uname = f" @{esc(u['username'])}" if u["username"] else ""
+        kb.button(
+            text=f"#{u['id']} — {name}{uname}",
+            callback_data=f"info:{u['id']}",
+        )
+    kb.adjust(1)
+    return (
+        f"🚫 <b>Заблокированные пользователи</b> ({len(users)}):\n\n"
+        "Нажми на пользователя, чтобы управлять им.",
+        kb.as_markup(),
+    )
+
+
+async def cmd_banned(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    text, markup = banned_users_list()
+    await message.answer(text, reply_markup=markup)
+
+
 @dp.message(Command("user"))
 async def cmd_user(message: Message):
     if not is_admin(message.from_user.id):
@@ -616,6 +643,7 @@ BTN_WRITE = "✍️ Написать"
 BTN_HISTORY = "📜 История"
 BTN_STATS = "📊 Статистика"
 BTN_LIST = "👥 Список"
+BTN_BANNED = "🚫 Блокировки"
 BTN_ADD_ID = "➕ Добавить ID"
 BTN_BCAST = "📢 Рассылка"
 BTN_HELP = "❓ Помощь"
@@ -627,16 +655,16 @@ def admin_cmds_keyboard() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text=BTN_WRITE)],
             [KeyboardButton(text=BTN_HISTORY), KeyboardButton(text=BTN_STATS)],
-            [KeyboardButton(text=BTN_LIST), KeyboardButton(text=BTN_ADD_ID)],
-            [KeyboardButton(text=BTN_BCAST), KeyboardButton(text=BTN_HELP)],
-            [KeyboardButton(text=BTN_CANCEL)],
+            [KeyboardButton(text=BTN_LIST), KeyboardButton(text=BTN_BANNED)],
+            [KeyboardButton(text=BTN_ADD_ID), KeyboardButton(text=BTN_BCAST)],
+            [KeyboardButton(text=BTN_HELP), KeyboardButton(text=BTN_CANCEL)],
         ],
         resize_keyboard=True,
         is_persistent=True,
     )
 
 
-BTN_CMDS = {BTN_WRITE, BTN_HISTORY, BTN_STATS, BTN_LIST, BTN_ADD_ID, BTN_BCAST, BTN_HELP, BTN_CANCEL}
+BTN_CMDS = {BTN_WRITE, BTN_HISTORY, BTN_STATS, BTN_LIST, BTN_BANNED, BTN_ADD_ID, BTN_BCAST, BTN_HELP, BTN_CANCEL}
 
 
 # ────────────────────────────── Messages ──────────────────────────────
@@ -782,6 +810,8 @@ async def handle_user_message(message: Message):
             return await cmd_stats(message)
         if message.text == BTN_LIST:
             return await cmd_list(message)
+        if message.text == BTN_BANNED:
+            return await cmd_banned(message)
         if message.text == BTN_BCAST:
             await message.answer(
                 "📢 <b>Введите текст для рассылки</b>\n\n"
