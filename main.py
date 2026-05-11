@@ -23,6 +23,9 @@ write_flow_anon_id: int | None = None
 # Track "add user by ID" flow
 add_user_step: bool = False
 
+# Track "rename user" flow
+rename_anon_id: int | None = None
+
 # Track waiting messages: user_id -> message_id of "подождите" message
 waiting_messages: dict[int, int] = {}
 
@@ -191,11 +194,12 @@ async def cmd_help(message: Message):
 async def cmd_cancel(message: Message):
     if not is_admin(message.from_user.id):
         return
-    global admin_pending_reply, write_flow_step, write_flow_anon_id, add_user_step
+    global admin_pending_reply, write_flow_step, write_flow_anon_id, add_user_step, rename_anon_id
     admin_pending_reply = None
     write_flow_step = None
     write_flow_anon_id = None
     add_user_step = False
+    rename_anon_id = None
     await cmd_help(message)
 
 
@@ -383,6 +387,7 @@ async def cmd_user(message: Message):
 
     kb = InlineKeyboardBuilder()
     kb.button(text="✍️ Написать", callback_data=f"reply:{anon_id}")
+    kb.button(text="✏️ Изменить имя", callback_data=f"rename:{anon_id}")
     if u["is_banned"]:
         kb.button(text="✅ Разблокировать", callback_data=f"unban:{anon_id}")
     else:
@@ -390,43 +395,6 @@ async def cmd_user(message: Message):
     kb.adjust(1)
 
     await message.answer(text, reply_markup=kb.as_markup())
-
-
-@dp.message(Command("find"))
-async def cmd_find(message: Message):
-    if not is_admin(message.from_user.id):
-        return
-    args = message.text.split(maxsplit=1)
-    if len(args) < 2:
-        await message.answer("❌ Используй: <code>/find @username</code>")
-        return
-    username = args[1].lstrip("@")
-    try:
-        chat = await message.bot.get_chat(f"@{username}")
-        uid = chat.id
-        name = chat.first_name or ""
-        uname = chat.username or ""
-        existing = db.get_user(uid)
-        if existing:
-            anon_id = existing["id"]
-            await message.answer(
-                f"✅ Пользователь @{uname} уже в БД.\n"
-                f"🆔 Анонимный ID: <b>#{anon_id}</b>\n"
-                f"👤 {esc(name)}"
-            )
-        else:
-            anon_id, _ = db.add_user(uid, name, uname, chat.language_code or "")
-            await message.answer(
-                f"✅ Пользователь @{uname} добавлен в БД!\n"
-                f"🆔 Анонимный ID: <b>#{anon_id}</b>\n"
-                f"👤 {esc(name)}"
-            )
-    except Exception as e:
-        await message.answer(
-            f"❌ Не удалось найти @{username}.\n"
-            "Пользователь должен написать боту хотя бы раз.\n"
-            f"<code>{esc(str(e)[:200])}</code>"
-        )
 
 
 @dp.message(Command("broadcast"))
@@ -507,7 +475,7 @@ async def cmd_history(message: Message):
 
 @dp.callback_query()
 async def handle_callback(callback: CallbackQuery):
-    global admin_pending_reply, write_flow_step, write_flow_anon_id
+    global admin_pending_reply, write_flow_step, write_flow_anon_id, rename_anon_id
     if not is_admin(callback.from_user.id):
         await callback.answer(f"❌ Только для {ADMIN_NAME}.", show_alert=True)
         return
@@ -557,6 +525,7 @@ async def handle_callback(callback: CallbackQuery):
         )
         kb = InlineKeyboardBuilder()
         kb.button(text="✍️ Написать", callback_data=f"reply:{anon_id}")
+        kb.button(text="✏️ Изменить имя", callback_data=f"rename:{anon_id}")
         if u["is_banned"]:
             kb.button(text="✅ Разблокировать", callback_data=f"unban:{anon_id}")
         else:
@@ -601,6 +570,15 @@ async def handle_callback(callback: CallbackQuery):
         else:
             await callback.message.edit_text(text)
 
+    elif action == "rename":
+        rename_anon_id = anon_id
+        await callback.answer()
+        await callback.message.answer(
+            f"✏️ <b>Введите новое имя</b> для пользователя #<b>{anon_id}</b>\n\n"
+            "Просто напиши новое имя.\n"
+            "/cancel — отменить"
+        )
+
     elif action == "none":
         await callback.answer()
 
@@ -636,13 +614,13 @@ BTN_CMDS = {BTN_WRITE, BTN_HISTORY, BTN_STATS, BTN_LIST, BTN_ADD_ID, BTN_BCAST, 
 
 @dp.message()
 async def handle_user_message(message: Message):
-    global admin_pending_reply, write_flow_step, write_flow_anon_id, add_user_step
+    global admin_pending_reply, write_flow_step, write_flow_anon_id, add_user_step, rename_anon_id
     user_id = message.from_user.id
 
     if is_admin(user_id):
         if message.text and message.text.startswith("/"):
             return
-        if message.text is None and admin_pending_reply is None and write_flow_step is None and not add_user_step:
+        if message.text is None and admin_pending_reply is None and write_flow_step is None and not add_user_step and rename_anon_id is None:
             return
 
         # ── Handle write-to-user flow ──
@@ -743,6 +721,22 @@ async def handle_user_message(message: Message):
                     f"<code>{esc(str(e)[:200])}</code>",
                     reply_markup=admin_cmds_keyboard(),
                 )
+            return
+
+        # ── Handle rename flow ──
+        if rename_anon_id is not None:
+            text = message.text or ""
+            if not text.strip():
+                await message.answer("❌ Имя не может быть пустым.")
+                return
+            new_name = text.strip()[:64]
+            db.rename_user(rename_anon_id, new_name)
+            anon_id = rename_anon_id
+            rename_anon_id = None
+            await message.answer(
+                f"✅ Имя пользователя #<b>{anon_id}</b> изменено на <b>{esc(new_name)}</b>",
+                reply_markup=admin_cmds_keyboard(),
+            )
             return
 
         # ── Handle keyboard buttons ──

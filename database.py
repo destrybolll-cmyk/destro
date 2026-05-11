@@ -131,6 +131,13 @@ class Database:
             ).fetchone()
             return result["text"] if result else None
 
+    def rename_user(self, anon_id: int, new_name: str):
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE users SET first_name = ? WHERE id = ?",
+                (new_name, anon_id),
+            )
+
     def get_messages_since(self, minutes: int = 60):
         with self._get_conn() as conn:
             return conn.execute(
