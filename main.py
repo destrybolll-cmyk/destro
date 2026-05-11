@@ -20,6 +20,9 @@ admin_pending_reply: int | None = None
 write_flow_step: str | None = None  # "await_id" or "await_text"
 write_flow_anon_id: int | None = None
 
+# Track "add user by ID" flow
+add_user_step: bool = False
+
 # Track waiting messages: user_id -> message_id of "подождите" message
 waiting_messages: dict[int, int] = {}
 
@@ -167,7 +170,8 @@ async def cmd_help(message: Message):
             "   <code>/history 30</code> — за 30 минут\n\n"
             "📊 <b>Статистика</b> — статистика бота\n\n"
             "👥 <b>Список</b> — список пользователей\n\n"
-            "🔍 <code>/find @user</code> — найти/добавить пользователя\n\n"
+            "➕ <b>Добавить ID</b> — добавить пользователя по Telegram ID\n\n"
+            "🔍 <code>/find @user</code> — найти/добавить по юзернейму\n\n"
             "📢 <b>Рассылка</b> — написать всем\n\n"
             "❌ <b>Отмена</b> — отменить текущее действие",
             reply_markup=admin_cmds_keyboard(),
@@ -187,10 +191,11 @@ async def cmd_help(message: Message):
 async def cmd_cancel(message: Message):
     if not is_admin(message.from_user.id):
         return
-    global admin_pending_reply, write_flow_step, write_flow_anon_id
+    global admin_pending_reply, write_flow_step, write_flow_anon_id, add_user_step
     admin_pending_reply = None
     write_flow_step = None
     write_flow_anon_id = None
+    add_user_step = False
     await cmd_help(message)
 
 
@@ -604,6 +609,7 @@ BTN_WRITE = "✍️ Написать"
 BTN_HISTORY = "📜 История"
 BTN_STATS = "📊 Статистика"
 BTN_LIST = "👥 Список"
+BTN_ADD_ID = "➕ Добавить ID"
 BTN_BCAST = "📢 Рассылка"
 BTN_HELP = "❓ Помощь"
 BTN_CANCEL = "❌ Отмена"
@@ -614,28 +620,29 @@ def admin_cmds_keyboard() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text=BTN_WRITE)],
             [KeyboardButton(text=BTN_HISTORY), KeyboardButton(text=BTN_STATS)],
-            [KeyboardButton(text=BTN_LIST), KeyboardButton(text=BTN_BCAST)],
-            [KeyboardButton(text=BTN_HELP), KeyboardButton(text=BTN_CANCEL)],
+            [KeyboardButton(text=BTN_LIST), KeyboardButton(text=BTN_ADD_ID)],
+            [KeyboardButton(text=BTN_BCAST), KeyboardButton(text=BTN_HELP)],
+            [KeyboardButton(text=BTN_CANCEL)],
         ],
         resize_keyboard=True,
         is_persistent=True,
     )
 
 
-BTN_CMDS = {BTN_WRITE, BTN_HISTORY, BTN_STATS, BTN_LIST, BTN_BCAST, BTN_HELP, BTN_CANCEL}
+BTN_CMDS = {BTN_WRITE, BTN_HISTORY, BTN_STATS, BTN_LIST, BTN_ADD_ID, BTN_BCAST, BTN_HELP, BTN_CANCEL}
 
 
 # ────────────────────────────── Messages ──────────────────────────────
 
 @dp.message()
 async def handle_user_message(message: Message):
-    global admin_pending_reply, write_flow_step, write_flow_anon_id
+    global admin_pending_reply, write_flow_step, write_flow_anon_id, add_user_step
     user_id = message.from_user.id
 
     if is_admin(user_id):
         if message.text and message.text.startswith("/"):
             return
-        if message.text is None and admin_pending_reply is None and write_flow_step is None:
+        if message.text is None and admin_pending_reply is None and write_flow_step is None and not add_user_step:
             return
 
         # ── Handle write-to-user flow ──
@@ -683,6 +690,59 @@ async def handle_user_message(message: Message):
                 await message.answer(f"❌ Ошибка: {e}")
             write_flow_step = None
             write_flow_anon_id = None
+            return
+
+        # ── Handle add-user-by-ID flow ──
+        if message.text == BTN_ADD_ID:
+            add_user_step = True
+            await message.answer(
+                "🔢 <b>Введи Telegram ID пользователя</b> (число).\n\n"
+                "Чтобы узнать ID: перешли любое сообщение от пользователя "
+                "в @userinfobot.\n\n"
+                "Или отправь /cancel чтобы отменить."
+            )
+            return
+
+        if add_user_step:
+            if message.text is None:
+                await message.answer("❌ ID должен быть числом.")
+                return
+            try:
+                uid = int(message.text.strip())
+            except ValueError:
+                await message.answer("❌ ID должен быть числом.")
+                return
+            add_user_step = False
+            existing = db.get_user(uid)
+            if existing:
+                await message.answer(
+                    f"ℹ️ Пользователь с ID <code>{uid}</code> уже есть в БД.\n"
+                    f"🆔 Анонимный ID: <b>#{existing['id']}</b>\n"
+                    f"👤 {esc(existing['first_name'] or '—')}\n"
+                    f"🔗 @{esc(existing['username']) if existing['username'] else '—'}",
+                    reply_markup=admin_cmds_keyboard(),
+                )
+                return
+            try:
+                chat = await message.bot.get_chat(uid)
+                anon_id, _ = db.add_user(uid, chat.first_name or "", chat.username or "", chat.language_code or "")
+                await message.answer(
+                    f"✅ Пользователь <code>{uid}</code> добавлен!\n"
+                    f"🆔 Анонимный ID: <b>#{anon_id}</b>\n"
+                    f"👤 {esc(chat.first_name or '—')}\n"
+                    f"🔗 @{esc(chat.username) if chat.username else '—'}",
+                    reply_markup=admin_cmds_keyboard(),
+                )
+            except Exception as e:
+                anon_id, _ = db.add_user(uid, "", "", "")
+                await message.answer(
+                    f"⚠️ Пользователь <code>{uid}</code> добавлен в БД, "
+                    f"но бот не может получить о нём информацию.\n"
+                    f"🆔 Анонимный ID: <b>#{anon_id}</b>\n\n"
+                    f"Возможно, этот пользователь ещё не писал боту.\n"
+                    f"<code>{esc(str(e)[:200])}</code>",
+                    reply_markup=admin_cmds_keyboard(),
+                )
             return
 
         # ── Handle keyboard buttons ──
