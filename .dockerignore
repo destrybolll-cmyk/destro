@@ -1,0 +1,9 @@
+__pycache__
+*.pyc
+.env
+bot.db
+.vbs
+.bat
+.ps1
+logo_cookie.png
+create_logo.py

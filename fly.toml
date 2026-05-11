@@ -1,0 +1,8 @@
+app = "cookie-anon-bot"
+
+[env]
+  DB_PATH = "/data/bot.db"
+
+[[mounts]]
+  source = "bot_data"
+  destination = "/data"
