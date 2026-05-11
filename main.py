@@ -47,7 +47,7 @@ def make_ttt_board(board: list[list[str]], anon_id: int, finished: bool = False)
                 row_btns.append(InlineKeyboardButton(text="⬜", callback_data=f"ttt:move:{anon_id}:{r}:{c}"))
         kb.row(*row_btns)
     if finished:
-        kb.row(InlineKeyboardButton(text="🔄 Играть ещё", callback_data=f"ttt:new:{anon_id}"))
+        kb.row(InlineKeyboardButton(text="🔄 Играть ещё", callback_data=f"ttt:again:{anon_id}"))
     return kb.as_markup()
 
 
@@ -68,6 +68,11 @@ async def send_ttt_game(target_user_id: int, anon_id: int, admin_id: int, board:
     board_markup = make_ttt_board(board, anon_id, finished=game_over)
     admin_label = f"🎮 <b>Крестики-нолики</b> с пользователем #<b>{anon_id}</b>\n"
     user_label = f"🎮 <b>Крестики-нолики</b> с {ADMIN_NAME}\n"
+
+    admin_stats = db.get_ttt_stats(admin_id)
+    user_stats = db.get_ttt_stats(target_user_id)
+    admin_label += f"\n📊 Ваш счёт: {admin_stats['wins']}🏆 {admin_stats['losses']}😞 {admin_stats['draws']}🤝"
+    user_label += f"\n📊 Ваш счёт: {user_stats['wins']}🏆 {user_stats['losses']}😞 {user_stats['draws']}🤝"
 
     if game_over:
         winner = check_ttt_winner(board)
@@ -674,6 +679,26 @@ async def handle_callback(callback: CallbackQuery):
             await send_ttt_game(non_admin_id, challenge_anon_id, ADMIN_ID, board, "X")
             return
 
+        # ── Instant rematch (after finished game) ──
+        if sub == "again":
+            anon_id = int(parts[2])
+            target_user_id = db.get_user_id_by_anon(anon_id)
+            if target_user_id is None:
+                await callback.answer("❌ Ошибка.", show_alert=True)
+                return
+
+            board = [[" ", " ", " "] for _ in range(3)]
+            games[target_user_id] = {
+                "board": board,
+                "current": "X",
+                "anon_id": anon_id,
+                "admin_msg_id": None,
+                "user_msg_id": None,
+            }
+            await callback.answer()
+            await send_ttt_game(target_user_id, anon_id, ADMIN_ID, board, "X")
+            return
+
         # ── New challenge ──
         anon_id = int(parts[2])
         target_user_id = db.get_user_id_by_anon(anon_id)
@@ -749,6 +774,15 @@ async def handle_callback(callback: CallbackQuery):
             winner = check_ttt_winner(board)
             if winner or all(board[i][j] != " " for i in range(3) for j in range(3)):
                 await send_ttt_game(target_user_id, anon_id, ADMIN_ID, board, game["current"], game_over=True)
+                if winner == "X":
+                    db.update_ttt_stats(ADMIN_ID, "win")
+                    db.update_ttt_stats(target_user_id, "loss")
+                elif winner == "O":
+                    db.update_ttt_stats(ADMIN_ID, "loss")
+                    db.update_ttt_stats(target_user_id, "win")
+                else:
+                    db.update_ttt_stats(ADMIN_ID, "draw")
+                    db.update_ttt_stats(target_user_id, "draw")
                 if target_user_id in games:
                     del games[target_user_id]
             else:

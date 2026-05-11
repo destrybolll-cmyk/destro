@@ -45,6 +45,12 @@ class Database:
                 conn.execute("ALTER TABLE messages ADD COLUMN direction TEXT DEFAULT 'user_to_admin'")
             except sqlite3.OperationalError:
                 pass
+            # Migration: add TTT stats columns
+            for col in ("ttt_wins", "ttt_losses", "ttt_draws"):
+                try:
+                    conn.execute(f"ALTER TABLE users ADD COLUMN {col} INTEGER DEFAULT 0")
+                except sqlite3.OperationalError:
+                    pass
 
     def add_user(self, user_id: int, first_name: str = "", username: str = "", language_code: str = "") -> tuple:
         with self._get_conn() as conn:
@@ -179,3 +185,19 @@ class Database:
                 "SELECT COUNT(*) FROM users WHERE is_banned = 1"
             ).fetchone()[0]
             return {"total": total, "banned": banned, "active": total - banned}
+
+    def update_ttt_stats(self, user_id: int, result: str):
+        col = {"win": "ttt_wins", "loss": "ttt_losses", "draw": "ttt_draws"}.get(result)
+        if col:
+            with self._get_conn() as conn:
+                conn.execute(f"UPDATE users SET {col} = {col} + 1 WHERE user_id = ?", (user_id,))
+
+    def get_ttt_stats(self, user_id: int) -> dict:
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT ttt_wins, ttt_losses, ttt_draws FROM users WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+            if row:
+                return {"wins": row["ttt_wins"] or 0, "losses": row["ttt_losses"] or 0, "draws": row["ttt_draws"] or 0}
+            return {"wins": 0, "losses": 0, "draws": 0}
