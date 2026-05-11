@@ -51,6 +51,16 @@ class Database:
                     conn.execute(f"ALTER TABLE users ADD COLUMN {col} INTEGER DEFAULT 0")
                 except sqlite3.OperationalError:
                     pass
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS ttt_pair_stats (
+                    user_id    INTEGER NOT NULL,
+                    admin_id   INTEGER NOT NULL,
+                    admin_wins INTEGER DEFAULT 0,
+                    user_wins  INTEGER DEFAULT 0,
+                    draws      INTEGER DEFAULT 0,
+                    PRIMARY KEY (user_id, admin_id)
+                )
+            """)
 
     def add_user(self, user_id: int, first_name: str = "", username: str = "", language_code: str = "") -> tuple:
         with self._get_conn() as conn:
@@ -201,3 +211,23 @@ class Database:
             if row:
                 return {"wins": row["ttt_wins"] or 0, "losses": row["ttt_losses"] or 0, "draws": row["ttt_draws"] or 0}
             return {"wins": 0, "losses": 0, "draws": 0}
+
+    def update_pair_stats(self, user_id: int, admin_id: int, admin_won: bool | None):
+        col = "admin_wins" if admin_won is True else ("user_wins" if admin_won is False else "draws")
+        with self._get_conn() as conn:
+            conn.execute(f"""
+                INSERT INTO ttt_pair_stats (user_id, admin_id, admin_wins, user_wins, draws)
+                VALUES (?, ?, 0, 0, 0)
+                ON CONFLICT(user_id, admin_id) DO NOTHING
+            """, (user_id, admin_id))
+            conn.execute(f"UPDATE ttt_pair_stats SET {col} = {col} + 1 WHERE user_id = ? AND admin_id = ?", (user_id, admin_id))
+
+    def get_pair_stats(self, user_id: int, admin_id: int) -> dict:
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT admin_wins, user_wins, draws FROM ttt_pair_stats WHERE user_id = ? AND admin_id = ?",
+                (user_id, admin_id),
+            ).fetchone()
+            if row:
+                return {"admin_wins": row["admin_wins"] or 0, "user_wins": row["user_wins"] or 0, "draws": row["draws"] or 0}
+            return {"admin_wins": 0, "user_wins": 0, "draws": 0}

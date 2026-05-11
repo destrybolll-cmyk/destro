@@ -112,6 +112,7 @@ async def send_ttt_game(target_user_id: int, anon_id: int, admin_id: int, board:
 
     admin_stats = db.get_ttt_stats(admin_id)
     user_stats = db.get_ttt_stats(target_user_id)
+    pair_stats = db.get_pair_stats(target_user_id, admin_id) if game_over else None
 
     game = games.get(target_user_id)
     admin_symbol = game["admin_symbol"] if game else "X"
@@ -129,10 +130,12 @@ async def send_ttt_game(target_user_id: int, anon_id: int, admin_id: int, board:
                 lines.append("😞 <b>Вы проиграли.</b>")
             else:
                 lines.append("🤝 <b>Ничья!</b>")
+            if pair_stats:
+                lines.append(f"\n📊 {ADMIN_NAME} {pair_stats['admin_wins']} — #{anon_id} {pair_stats['user_wins']} (ничьи: {pair_stats['draws']})")
         else:
             my_turn = (current == my_sym)
             lines.append(f"{'❌' if current == 'X' else '⭕'} {'<b>Ваш ход</b>' if my_turn else 'Ход соперника'}")
-        lines.append(f"\n📊 Счёт: {stats['wins']}🏆 {stats['losses']}😞 {stats['draws']}🤝")
+            lines.append(f"\n📊 Ваш счёт: {stats['wins']}🏆 {stats['losses']}😞 {stats['draws']}🤝")
         return "\n".join(lines)
 
     admin_label = make_label(admin_opponent, admin_stats, True)
@@ -925,17 +928,16 @@ async def handle_callback(callback: CallbackQuery):
             board[r][c] = expected
             winner = check_ttt_winner(board)
             if winner or all(board[i][j] != " " for i in range(3) for j in range(3)):
-                await send_ttt_game(target_user_id, anon_id, ADMIN_ID, board, game["current"], game_over=True)
                 if winner:
-                    if winner == game["admin_symbol"]:
-                        db.update_ttt_stats(ADMIN_ID, "win")
-                        db.update_ttt_stats(target_user_id, "loss")
-                    else:
-                        db.update_ttt_stats(ADMIN_ID, "loss")
-                        db.update_ttt_stats(target_user_id, "win")
+                    admin_won = winner == game["admin_symbol"]
+                    db.update_ttt_stats(ADMIN_ID, "win" if admin_won else "loss")
+                    db.update_ttt_stats(target_user_id, "loss" if admin_won else "win")
+                    db.update_pair_stats(target_user_id, ADMIN_ID, admin_won)
                 else:
                     db.update_ttt_stats(ADMIN_ID, "draw")
                     db.update_ttt_stats(target_user_id, "draw")
+                    db.update_pair_stats(target_user_id, ADMIN_ID, None)
+                await send_ttt_game(target_user_id, anon_id, ADMIN_ID, board, game["current"], game_over=True)
                 if target_user_id in games:
                     del games[target_user_id]
             else:
