@@ -392,6 +392,7 @@ async def cmd_user(message: Message):
         kb.button(text="✅ Разблокировать", callback_data=f"unban:{anon_id}")
     else:
         kb.button(text="🚫 Заблокировать", callback_data=f"ban:{anon_id}")
+    kb.button(text="🗑 Удалить", callback_data=f"del_ask:{anon_id}")
     kb.adjust(1)
 
     await message.answer(text, reply_markup=kb.as_markup())
@@ -530,6 +531,7 @@ async def handle_callback(callback: CallbackQuery):
             kb.button(text="✅ Разблокировать", callback_data=f"unban:{anon_id}")
         else:
             kb.button(text="🚫 Заблокировать", callback_data=f"ban:{anon_id}")
+        kb.button(text="🗑 Удалить", callback_data=f"del_ask:{anon_id}")
         kb.adjust(1)
         await callback.message.answer(text, reply_markup=kb.as_markup())
 
@@ -578,6 +580,33 @@ async def handle_callback(callback: CallbackQuery):
             "Просто напиши новое имя.\n"
             "/cancel — отменить"
         )
+
+    elif action == "del_ask":
+        await callback.answer()
+        kb = InlineKeyboardBuilder()
+        kb.button(text="✅ Да, удалить", callback_data=f"del_yes:{anon_id}")
+        kb.button(text="❌ Нет", callback_data=f"del_no:{anon_id}")
+        kb.adjust(2)
+        await callback.message.answer(
+            f"🗑 <b>Точно удалить</b> пользователя #<b>{anon_id}</b>?\n"
+            "Все его сообщения и данные будут безвозвратно удалены.",
+            reply_markup=kb.as_markup(),
+        )
+
+    elif action == "del_yes":
+        await callback.answer("🗑 Пользователь удалён.")
+        db.delete_user(anon_id)
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+
+    elif action == "del_no":
+        await callback.answer()
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
 
     elif action == "none":
         await callback.answer()

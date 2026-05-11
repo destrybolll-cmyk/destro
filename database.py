@@ -138,6 +138,14 @@ class Database:
                 (new_name, anon_id),
             )
 
+    def delete_user(self, anon_id: int):
+        with self._get_conn() as conn:
+            user = conn.execute("SELECT user_id FROM users WHERE id = ?", (anon_id,)).fetchone()
+            if user:
+                uid = user["user_id"]
+                conn.execute("DELETE FROM messages WHERE user_id = ?", (uid,))
+                conn.execute("DELETE FROM users WHERE id = ?", (anon_id,))
+
     def get_messages_since(self, minutes: int = 60):
         with self._get_conn() as conn:
             return conn.execute(
