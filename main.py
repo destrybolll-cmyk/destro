@@ -3,6 +3,7 @@ import logging
 import html
 import os
 import random
+import secrets
 import time
 import sqlite3
 from datetime import datetime
@@ -439,8 +440,8 @@ async def dice_play_game(game_id: int):
     p2_uid = db.get_user_id_by_anon(p2_anon)
     if p2_uid is None:
         return
-    p1_score = random.randint(1, 6) + random.randint(1, 6)
-    p2_score = random.randint(1, 6) + random.randint(1, 6)
+    p1_score = secrets.randbelow(6) + 1 + secrets.randbelow(6) + 1
+    p2_score = secrets.randbelow(6) + 1 + secrets.randbelow(6) + 1
     db.finish_dice_game(game_id, p1_score, p2_score)
     p1_name = ADMIN_NAME
     p2_name = f"#{p2_anon}"
