@@ -112,6 +112,23 @@ class Database:
                     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS secrets (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id         INTEGER NOT NULL,
+                    anon_id         INTEGER NOT NULL,
+                    text            TEXT NOT NULL,
+                    status          TEXT DEFAULT 'pending',
+                    cookies_awarded INTEGER DEFAULT 0,
+                    admin_comment   TEXT DEFAULT '',
+                    is_top          INTEGER DEFAULT 0,
+                    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            try:
+                conn.execute("ALTER TABLE users ADD COLUMN cookies INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
             try:
                 conn.execute("ALTER TABLE messages ADD COLUMN direction TEXT DEFAULT 'user_to_admin'")
             except sqlite3.OperationalError:
@@ -416,3 +433,49 @@ class Database:
             else:
                 losses += 1
         return {"wins": wins, "losses": losses, "draws": draws, "total": wins + losses + draws, "opponents": len(opponents)}
+
+    # ──────────── Casino methods ────────────
+
+    def get_cookies(self, anon_id: int) -> int:
+        with self._get_conn() as conn:
+            r = conn.execute("SELECT cookies FROM users WHERE id = ?", (anon_id,)).fetchone()
+            return r["cookies"] if r else 0
+
+    def add_cookies(self, anon_id: int, amount: int):
+        with self._get_conn() as conn:
+            conn.execute("UPDATE users SET cookies = COALESCE(cookies, 0) + ? WHERE id = ?", (amount, anon_id))
+
+    def save_secret(self, anon_id: int, user_id: int, text: str) -> int:
+        with self._get_conn() as conn:
+            c = conn.execute("INSERT INTO secrets (user_id, anon_id, text) VALUES (?, ?, ?)", (user_id, anon_id, text))
+            return c.lastrowid
+
+    def get_secret(self, secret_id: int):
+        with self._get_conn() as conn:
+            return conn.execute("SELECT * FROM secrets WHERE id = ?", (secret_id,)).fetchone()
+
+    def accept_secret(self, secret_id: int, cookies: int, set_top: bool = False):
+        with self._get_conn() as conn:
+            conn.execute("UPDATE secrets SET status = 'accepted', cookies_awarded = ?, is_top = ? WHERE id = ?",
+                        (cookies, 1 if set_top else 0, secret_id))
+
+    def reject_secret(self, secret_id: int, comment: str):
+        with self._get_conn() as conn:
+            conn.execute("UPDATE secrets SET status = 'rejected', admin_comment = ? WHERE id = ?",
+                        (comment, secret_id))
+
+    def get_top_secrets(self, limit: int = 20):
+        with self._get_conn() as conn:
+            return conn.execute("""
+                SELECT id, text FROM secrets
+                WHERE is_top = 1 AND status = 'accepted'
+                ORDER BY id DESC LIMIT ?
+            """, (limit,)).fetchall()
+
+    def get_all_secrets(self):
+        with self._get_conn() as conn:
+            return conn.execute("""
+                SELECT s.*, u.first_name, u.username FROM secrets s
+                LEFT JOIN users u ON s.anon_id = u.id
+                ORDER BY s.id DESC
+            """).fetchall()
