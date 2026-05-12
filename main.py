@@ -226,7 +226,7 @@ def ttt_board_text(board: str) -> str:
         lines.append(f"  {cells[0]}  │  {cells[1]}  │  {cells[2]}")
         if r < 2:
             lines.append(" ─────┼─────┼─────")
-    return "\n".join(lines)
+    return f"<code>{chr(10).join(lines)}</code>"
 
 
 def ttt_check_winner(board: str) -> str:
@@ -253,23 +253,26 @@ def ttt_game_message(game) -> str:
     turn_name = ADMIN_NAME if turn_aid == ADMIN_ANON_ID else f"#{turn_aid}"
     turn_mark = "X" if turn_aid == game["x_player"] else "O"
 
+    x_emoji = TTT_CELL_X
+    o_emoji = TTT_CELL_O
     lines = [
-        "\U0001f3ae <b>Крестики-нолики</b>",
-        f"X — {x_name}",
-        f"O — {o_name}",
+        f"<b>\U0001f3ae Крестики-нолики</b>",
+        f"{x_emoji} <b>X</b> — {x_name}    {o_emoji} <b>O</b> — {o_name}",
         "",
         ttt_board_text(board),
     ]
     if game["status"] == "active":
-        lines.extend(["", f"\U0001f449 Ход: <b>{turn_name}</b> ({turn_mark})"])
+        turn_emoji = TTT_CELL_X if turn_mark == "X" else TTT_CELL_O
+        lines.extend(["", f"<b>\U0001f449 Ход: {turn_name}</b> ({turn_emoji})"])
     elif game["status"] == "finished":
         w = game["winner"]
         if w == "draw":
-            lines.extend(["", "\U0001f91d <b>Ничья!</b>"])
+            lines.extend(["", "<b>\U0001f91d Ничья!</b>"])
         else:
             w_aid = game["x_player"] if w == "X" else o_aid
             w_name = ADMIN_NAME if w_aid == ADMIN_ANON_ID else f"#{w_aid}"
-            lines.extend(["", f"\U0001f3c6 <b>Победил: {w_name}</b>"])
+            w_emoji = TTT_CELL_X if w == "X" else TTT_CELL_O
+            lines.extend(["", f"<b>\U0001f3c6 Победил: {w_name}</b> {w_emoji}"])
     return "\n".join(lines)
 
 
@@ -324,20 +327,21 @@ async def ttt_send_board(game):
     admin_kb = ttt_build_keyboard(game, admin_aid, admin_can_move)
     user_kb = ttt_build_keyboard(game, user_aid, user_can_move)
     gid = game["id"]
-    last_id = row_get(game, "admin_msg_id", 0)
-    if last_id:
-        try:
-            await bot.edit_message_text(text, admin_uid, last_id, reply_markup=admin_kb)
-        except Exception:
-            msg = await bot.send_message(admin_uid, text, reply_markup=admin_kb)
-            db.update_game(gid, admin_msg_id=msg.message_id)
-    else:
-        msg = await bot.send_message(admin_uid, text, reply_markup=admin_kb)
-        db.update_game(gid, admin_msg_id=msg.message_id)
-    try:
-        await bot.send_message(user_uid, text, reply_markup=user_kb)
-    except Exception:
-        await bot.send_message(admin_uid, f"\u274c Не удалось отправить сообщение пользователю #{user_aid}.")
+    admin_last = row_get(game, "admin_msg_id", 0)
+    user_last = row_get(game, "user_msg_id", 0)
+
+    async def send_or_edit(uid, last_id, kb, col):
+        if last_id:
+            try:
+                await bot.edit_message_text(text, uid, last_id, reply_markup=kb)
+                return
+            except Exception:
+                pass
+        msg = await bot.send_message(uid, text, reply_markup=kb)
+        db.update_game(gid, **{col: msg.message_id})
+
+    await send_or_edit(admin_uid, admin_last, admin_kb, "admin_msg_id")
+    await send_or_edit(user_uid, user_last, user_kb, "user_msg_id")
 
 
 async def ttt_start_game(game_id: int):
