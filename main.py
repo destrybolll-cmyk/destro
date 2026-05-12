@@ -1214,12 +1214,21 @@ async def _handle_callback(callback: CallbackQuery):
 
     elif action == "dice_accept":
         game_id = int(parts[1])
+        # Verify the clicker is the challenged user
+        clicker_anon = db.get_anon_id_by_user_id(callback.from_user.id)
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            dg = conn.execute("SELECT * FROM dice_games WHERE id = ?", (game_id,)).fetchone()
+        if dg and clicker_anon and clicker_anon != dg["player2_anon_id"]:
+            await callback.answer("❌ Это не ваш вызов.", show_alert=True)
+            return
         await callback.answer("\U0001f3b2 Кидаем кубики!")
         try:
             await callback.message.delete()
         except Exception:
             pass
         await dice_play_game(game_id)
+        return
 
     elif action == "dice_decline":
         game_id = int(parts[1])
@@ -1230,6 +1239,7 @@ async def _handle_callback(callback: CallbackQuery):
             pass
         if not is_admin(callback.from_user.id):
             await bot.send_message(ADMIN_ID, "❌ Пользователь отклонил вызов в Везение.")
+        return
 
     elif action == "dice_rematch":
         old_id = int(parts[1])
@@ -1405,6 +1415,7 @@ async def _handle_callback(callback: CallbackQuery):
             "/cancel \u2014 отменить",
             reply_markup=admin_cmds_keyboard(),
         )
+        return
 
     elif action == "info":
         await callback.answer()
@@ -1449,6 +1460,7 @@ async def _handle_callback(callback: CallbackQuery):
             kb.button(text="\U0001f3ae Играть", callback_data=f"ttt_challenge:{anon_id}")
         kb.adjust(1)
         await callback.message.answer(text, reply_markup=kb.as_markup())
+        return
 
     elif action == "ban":
         await callback.answer("\U0001f6ab Пользователь заблокирован.")
@@ -1456,6 +1468,7 @@ async def _handle_callback(callback: CallbackQuery):
         await delete_waiting(target_user_id)
         new_kb = user_actions_keyboard(anon_id, is_banned=True).as_markup()
         await callback.message.edit_reply_markup(reply_markup=new_kb)
+        return
 
     elif action == "unban":
         await callback.answer("✅ Пользователь разблокирован.")
@@ -1463,6 +1476,7 @@ async def _handle_callback(callback: CallbackQuery):
         await delete_waiting(target_user_id)
         new_kb = user_actions_keyboard(anon_id, is_banned=False).as_markup()
         await callback.message.edit_reply_markup(reply_markup=new_kb)
+        return
 
     elif action == "wrt":
         admin_pending_reply = anon_id
@@ -1476,6 +1490,7 @@ async def _handle_callback(callback: CallbackQuery):
             "/cancel \u2014 отменить",
             reply_markup=admin_cmds_keyboard(),
         )
+        return
 
     elif action == "pgn":
         page = anon_id
@@ -1485,6 +1500,7 @@ async def _handle_callback(callback: CallbackQuery):
             await callback.message.edit_text(text, reply_markup=markup)
         else:
             await callback.message.edit_text(text)
+        return
 
     elif action == "pgn_del":
         page = anon_id
@@ -1494,6 +1510,7 @@ async def _handle_callback(callback: CallbackQuery):
             await callback.message.edit_text(text, reply_markup=markup)
         else:
             await callback.message.edit_text(text)
+        return
 
     elif action == "rename":
         rename_anon_id = anon_id
@@ -1503,6 +1520,7 @@ async def _handle_callback(callback: CallbackQuery):
             "Просто напиши новое имя.\n"
             "/cancel \u2014 отменить"
         )
+        return
 
     elif action == "del_ask":
         await callback.answer()
@@ -1516,6 +1534,7 @@ async def _handle_callback(callback: CallbackQuery):
             "Его можно будет восстановить.",
             reply_markup=kb.as_markup(),
         )
+        return
 
     elif action == "del_yes":
         await callback.answer()
@@ -1528,6 +1547,7 @@ async def _handle_callback(callback: CallbackQuery):
             f"\U0001f5d1 Пользователь #<b>{anon_id}</b> перемещён в \u00ab\U0001f5d1 Удаленные\u00bb.\n"
             "Можешь нажать кнопку <b>\U0001f5d1 Удаленные</b> внизу, чтобы посмотреть."
         )
+        return
 
     elif action == "del_no":
         await callback.answer()
@@ -1535,6 +1555,7 @@ async def _handle_callback(callback: CallbackQuery):
             await callback.message.delete()
         except Exception:
             pass
+        return
 
     elif action == "restore":
         await callback.answer("✅ Пользователь восстановлен.")
@@ -1547,6 +1568,7 @@ async def _handle_callback(callback: CallbackQuery):
         await callback.message.answer(
             f"✅ Пользователь #<b>{anon_id}</b> восстановлен и снова в списке."
         )
+        return
 
     elif action == "hard_del_ask":
         await callback.answer()
@@ -1559,6 +1581,7 @@ async def _handle_callback(callback: CallbackQuery):
             "Все сообщения и данные будут безвозвратно удалены.",
             reply_markup=kb.as_markup(),
         )
+        return
 
     elif action == "hard_del_yes":
         await callback.answer("\U0001f5d1 Пользователь удалён навсегда.")
@@ -1570,6 +1593,7 @@ async def _handle_callback(callback: CallbackQuery):
         await callback.message.answer(
             f"\U0001f5d1 Пользователь #<b>{anon_id}</b> и все его сообщения удалены навсегда."
         )
+        return
 
     elif action == "unblock":
         await callback.answer("✅ Пометка снята.")
@@ -1578,6 +1602,7 @@ async def _handle_callback(callback: CallbackQuery):
             await callback.message.delete()
         except Exception:
             pass
+        return
 
 
 BTN_WRITE = "\u270d\ufe0f Написать"
@@ -1629,6 +1654,11 @@ async def handle_user_message(message: Message):
         if message.text and message.text.startswith("/"):
             return
         if message.text is None and admin_pending_reply is None and write_flow_step is None and not add_user_step and rename_anon_id is None:
+            if message.photo or message.video or message.sticker or message.voice or message.document or message.animation:
+                await message.answer(
+                    "\U0001f4a1 Нажми <b>\u270d\ufe0f Ответить</b> под сообщением пользователя, чтобы отправить медиа.\n"
+                    "Или используй <b>\u270d\ufe0f Написать</b> в меню."
+                )
             return
 
         if write_flow_step == "await_id":

@@ -84,23 +84,6 @@ class Database:
                 conn.execute("ALTER TABLE games ADD COLUMN rematch_sent INTEGER DEFAULT 0")
             except sqlite3.OperationalError:
                 pass
-            # Migration: add games columns if missing (old schema)
-            for col_type in [
-                ("player1_anon_id", "INTEGER NOT NULL DEFAULT 0"),
-                ("player2_anon_id", "INTEGER NOT NULL DEFAULT 0"),
-                ("player1_user_id", "INTEGER NOT NULL DEFAULT 0"),
-                ("player2_user_id", "INTEGER NOT NULL DEFAULT 0"),
-                ("board", "TEXT DEFAULT '_________'"),
-                ("current_turn", "INTEGER"),
-                ("x_player", "INTEGER"),
-                ("status", "TEXT DEFAULT 'pending'"),
-                ("winner", "TEXT DEFAULT ''"),
-                ("finished_at", "TIMESTAMP"),
-            ]:
-                try:
-                    conn.execute(f"ALTER TABLE games ADD COLUMN {col_type[0]} {col_type[1]}")
-                except sqlite3.OperationalError:
-                    pass
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS dice_games (
                     id              INTEGER PRIMARY KEY AUTOINCREMENT,
