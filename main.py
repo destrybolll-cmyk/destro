@@ -798,6 +798,24 @@ async def cmd_history(message: Message):
 async def handle_callback(callback: CallbackQuery):
     global admin_pending_reply, write_flow_step, write_flow_anon_id, rename_anon_id
 
+    try:
+        await _handle_callback(callback)
+    except Exception as e:
+        logging.error(f"Callback error: {e}", exc_info=True)
+        try:
+            await callback.answer("❌ Произошла ошибка.", show_alert=True)
+        except Exception:
+            pass
+        if is_admin(callback.from_user.id):
+            try:
+                await bot.send_message(ADMIN_ID, f"❌ Ошибка в обработчике: {esc(str(e)[:200])}")
+            except Exception:
+                pass
+
+
+async def _handle_callback(callback: CallbackQuery):
+    global admin_pending_reply, write_flow_step, write_flow_anon_id, rename_anon_id
+
     parts = callback.data.split(":")
     action = parts[0]
 
