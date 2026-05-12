@@ -1030,6 +1030,7 @@ async def _handle_callback(callback: CallbackQuery):
         if action in ("ttt_accept", "ttt_decline", "ttt_move", "ttt_surrender", "ttt_rematch",
                        "appeal", "appeal_accept", "appeal_decline",
                         "dice_accept", "dice_decline", "dice_rematch", "dice_my_stats", "dice_pgn",
+                        "wisdom",
                         "none"):
             pass
         else:
@@ -1447,6 +1448,15 @@ async def _handle_callback(callback: CallbackQuery):
                 )
             except Exception:
                 pass
+        return
+
+    elif action == "wisdom":
+        if is_admin(callback.from_user.id):
+            anon_id = ADMIN_ANON_ID
+        else:
+            anon_id = int(parts[1])
+        await callback.answer()
+        await callback.message.answer(f"\U0001f4a1 <b>Мудрость дня</b>\n\n{wisdom_of_the_day(anon_id)}")
         return
 
     elif action == "none":
@@ -2020,7 +2030,10 @@ async def handle_user_message(message: Message):
             f"{ADMIN_NAME} уже получил твой вызов!"
         )
 
-    wait_msg = await message.answer(wait_text)
+    wait_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="\U0001f4a1 Мудрость дня", callback_data=f"wisdom:{anon_id}")]
+    ])
+    wait_msg = await message.answer(wait_text, reply_markup=wait_kb)
     waiting_messages[user_id] = wait_msg.message_id
 
 
