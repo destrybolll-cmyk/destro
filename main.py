@@ -884,8 +884,17 @@ async def _handle_callback(callback: CallbackQuery):
                 f"Нажми <b>❌ Отклонить</b> чтобы отказаться.",
                 reply_markup=accept_kb,
             )
-        except Exception:
-            await bot.send_message(ADMIN_ID, f"❌ Не удалось отправить вызов пользователю #{anon_id}.")
+        except Exception as e:
+            err_text = str(e)
+            if "chat not found" in err_text.lower() or "bot was blocked" in err_text.lower() or "forbidden" in err_text.lower():
+                await bot.send_message(
+                    ADMIN_ID,
+                    f"❌ Пользователь #{anon_id} не может получить вызов.\n"
+                    "Возможно, он не писал боту или заблокировал его.\n"
+                    "Пользователь должен написать боту любое сообщение, чтобы активировать чат."
+                )
+            else:
+                await bot.send_message(ADMIN_ID, f"❌ Не удалось отправить вызов пользователю #{anon_id}: {esc(err_text[:200])}")
         return
 
     elif action == "ttt_accept":
