@@ -65,6 +65,14 @@ class Database:
             except sqlite3.OperationalError:
                 pass
             try:
+                conn.execute("ALTER TABLE users ADD COLUMN appeal_count INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE users ADD COLUMN last_appeal TIMESTAMP")
+            except sqlite3.OperationalError:
+                pass
+            try:
                 conn.execute("ALTER TABLE games ADD COLUMN admin_msg_id INTEGER DEFAULT 0")
             except sqlite3.OperationalError:
                 pass
@@ -176,6 +184,29 @@ class Database:
     def unmark_blocked(self, anon_id: int):
         with self._get_conn() as conn:
             conn.execute("UPDATE users SET is_blocked = 0 WHERE id = ?", (anon_id,))
+
+    def check_appeal_limit(self, anon_id: int, max_per_hour: int = 3) -> tuple:
+        with self._get_conn() as conn:
+            u = conn.execute("SELECT appeal_count, last_appeal FROM users WHERE id = ?", (anon_id,)).fetchone()
+            if not u:
+                return True, 0
+            from datetime import datetime, timedelta
+            last = u["last_appeal"]
+            count = u["appeal_count"] or 0
+            if last:
+                last_dt = datetime.fromisoformat(last)
+                if datetime.now() - last_dt > timedelta(hours=1):
+                    conn.execute("UPDATE users SET appeal_count = 0, last_appeal = NULL WHERE id = ?", (anon_id,))
+                    return True, 0
+            return count < max_per_hour, max_per_hour - count
+
+    def increment_appeal(self, anon_id: int):
+        with self._get_conn() as conn:
+            from datetime import datetime
+            conn.execute("""
+                UPDATE users SET appeal_count = COALESCE(appeal_count, 0) + 1, last_appeal = ?
+                WHERE id = ?
+            """, (datetime.now().isoformat(), anon_id))
 
     def save_message(self, user_id: int, anon_id: int, text: str, direction: str = "user_to_admin"):
         with self._get_conn() as conn:

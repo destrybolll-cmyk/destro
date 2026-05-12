@@ -1065,7 +1065,12 @@ async def _handle_callback(callback: CallbackQuery):
             await callback.answer()
             return
         anon_id = int(parts[1])
+        allowed, remaining = db.check_appeal_limit(anon_id)
+        if not allowed:
+            await callback.answer("❌ Лимит апелляций: 3 в час. Попробуйте позже.", show_alert=True)
+            return
         await callback.answer()
+        db.increment_appeal(anon_id)
         u = db.get_user_by_anon(anon_id)
         if not u:
             return
