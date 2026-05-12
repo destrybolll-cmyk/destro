@@ -4,6 +4,7 @@ import html
 import os
 import random
 import time
+import sqlite3
 from datetime import datetime
 
 from aiogram import Bot, Dispatcher
@@ -422,17 +423,31 @@ def dice_game_list(page: int = 1):
     return text, InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-async def dice_play_game(game_id: int, anon_id: int, user_uid: int):
+async def dice_play_game(game_id: int):
+    # Fetch game from DB to get player IDs
+    # dice_games: player1=admin, player2=user
+    p1_anon = ADMIN_ANON_ID
+    p2_anon = None
+    # We need to get p2_anon from the dice_games table
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT * FROM dice_games WHERE id = ?", (game_id,)).fetchone()
+        if row:
+            p2_anon = row["player2_anon_id"]
+    if p2_anon is None:
+        return
+    p2_uid = db.get_user_id_by_anon(p2_anon)
+    if p2_uid is None:
+        return
     p1_score = random.randint(1, 6) + random.randint(1, 6)
     p2_score = random.randint(1, 6) + random.randint(1, 6)
     db.finish_dice_game(game_id, p1_score, p2_score)
-    game_info = db.get_dice_stats(anon_id)
-    p1_name = ADMIN_NAME if ADMIN_ANON_ID == anon_id else f"#{anon_id}"
-    p2_name = ADMIN_NAME if ADMIN_ANON_ID != anon_id else f"#{anon_id}"
+    p1_name = ADMIN_NAME
+    p2_name = f"#{p2_anon}"
     lines = [
         f"\U0001f3b2 <b>Везение!</b>\n",
-        f"<b>{p1_name}</b> \U0001f3b2: {p1_score // 2} + {p1_score - p1_score // 2} = <b>{p1_score}</b>",
-        f"<b>{p2_name}</b> \U0001f3b2: {p2_score // 2} + {p2_score - p2_score // 2} = <b>{p2_score}</b>",
+        f"<b>{p1_name}</b> \U0001f3b2: {p1_score} очков",
+        f"<b>{p2_name}</b> \U0001f3b2: {p2_score} очков",
         "",
     ]
     if p1_score > p2_score:
@@ -442,10 +457,9 @@ async def dice_play_game(game_id: int, anon_id: int, user_uid: int):
     else:
         lines.append("\U0001f91d <b>Ничья!</b>")
     text = "\n".join(lines)
-    admin_uid = ADMIN_ID
     try:
-        await bot.send_message(admin_uid, text)
-        await bot.send_message(user_uid, text)
+        await bot.send_message(ADMIN_ID, text)
+        await bot.send_message(p2_uid, text)
     except Exception:
         pass
 
@@ -1200,17 +1214,7 @@ async def _handle_callback(callback: CallbackQuery):
             await callback.message.delete()
         except Exception:
             pass
-        if is_admin(callback.from_user.id):
-            anon_id = ADMIN_ANON_ID
-        else:
-            anon_id = db.get_anon_id_by_user_id(callback.from_user.id)
-        if anon_id is None:
-            return
-        user_id = callback.from_user.id
-        opp_uid = ADMIN_ID if user_id == ADMIN_ID else db.get_user_id_by_anon(anon_id)
-        if opp_uid is None:
-            return
-        await dice_play_game(game_id, anon_id, opp_uid)
+        await dice_play_game(game_id)
 
     elif action == "dice_decline":
         game_id = int(parts[1])
