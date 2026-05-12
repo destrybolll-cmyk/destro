@@ -454,8 +454,8 @@ WISDOM_QUOTES = [
 ]
 
 
-def wisdom_of_the_day() -> str:
-    idx = datetime.now().toordinal() % len(WISDOM_QUOTES)
+def wisdom_of_the_day(anon_id: int = 0) -> str:
+    idx = (datetime.now().toordinal() * 100 + anon_id) % len(WISDOM_QUOTES)
     return WISDOM_QUOTES[idx]
 
 def dice_game_list(page: int = 1):
@@ -1873,7 +1873,7 @@ async def handle_user_message(message: Message):
             )
             return
         if message.text == BTN_WISDOM:
-            await message.answer(f"\U0001f4a1 <b>Мудрость дня</b>\n\n{wisdom_of_the_day()}")
+            await message.answer(f"\U0001f4a1 <b>Мудрость дня</b>\n\n{wisdom_of_the_day(ADMIN_ANON_ID)}")
             return
         if message.text == BTN_HELP:
             return await cmd_help(message)
@@ -1956,7 +1956,7 @@ async def handle_user_message(message: Message):
     # Wisdom keyword detection
     user_msg_lower = (message.text or message.caption or "").lower()
     if any(kw in user_msg_lower for kw in {"мудрость", "цитата", "мудрости"}):
-        await message.answer(f"\U0001f4a1 <b>Мудрость дня</b>\n\n{wisdom_of_the_day()}")
+        await message.answer(f"\U0001f4a1 <b>Мудрость дня</b>\n\n{wisdom_of_the_day(anon_id)}")
         return
 
     last_admin_msg = db.get_last_admin_message(user_id)
