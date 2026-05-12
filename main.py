@@ -35,10 +35,6 @@ GAME_KEYWORDS = {"игра", "ttt", "крестики", "нолики", "хоч�
 user_last_msg: dict[int, float] = {}
 user_spam_warnings: dict[int, int] = {}
 
-# Casino state
-secret_reject_awaiting: int | None = None
-user_telling_secret: set[int] = set()
-
 
 async def delete_waiting(target_user_id: int):
     msg_id = waiting_messages.pop(target_user_id, None)
@@ -588,13 +584,12 @@ async def cmd_help(message: Message):
 async def cmd_cancel(message: Message):
     if not is_admin(message.from_user.id):
         return
-    global admin_pending_reply, write_flow_step, write_flow_anon_id, add_user_step, rename_anon_id, secret_reject_awaiting
+    global admin_pending_reply, write_flow_step, write_flow_anon_id, add_user_step, rename_anon_id
     admin_pending_reply = None
     write_flow_step = None
     write_flow_anon_id = None
     add_user_step = False
     rename_anon_id = None
-    secret_reject_awaiting = None
     # Cancel any pending TTT challenge
     pending = db.get_player_game(ADMIN_ANON_ID, statuses=("pending",))
     if pending:
@@ -961,7 +956,7 @@ async def handle_callback(callback: CallbackQuery):
 
 
 async def _handle_callback(callback: CallbackQuery):
-    global admin_pending_reply, write_flow_step, write_flow_anon_id, rename_anon_id, secret_reject_awaiting
+    global admin_pending_reply, write_flow_step, write_flow_anon_id, rename_anon_id
 
     parts = callback.data.split(":")
     action = parts[0]
@@ -969,9 +964,8 @@ async def _handle_callback(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         if action in ("ttt_accept", "ttt_decline", "ttt_move", "ttt_surrender", "ttt_rematch",
                        "appeal", "appeal_accept", "appeal_decline",
-                       "dice_accept", "dice_decline", "dice_rematch", "dice_my_stats", "dice_pgn",
-                       "tell_secret", "balance", "top_secrets",
-                       "none"):
+                        "dice_accept", "dice_decline", "dice_rematch", "dice_my_stats", "dice_pgn",
+                        "none"):
             pass
         else:
             await callback.answer(f"❌ Только для {ADMIN_NAME}.", show_alert=True)
@@ -1380,45 +1374,6 @@ async def _handle_callback(callback: CallbackQuery):
                 pass
         return
 
-    # ── Casino user callbacks ──
-
-    elif action == "tell_secret":
-        if is_admin(callback.from_user.id):
-            await callback.answer()
-            return
-        anon_id = int(parts[1])
-        user_telling_secret.add(callback.from_user.id)
-        await callback.answer()
-        await callback.message.answer(
-            "\U0001f4dd <b>Расскажите секрет о Cookie</b>\n\n"
-            "Напишите секрет, который вы знаете.\n"
-            "Если он правдив, вы получите 1-2 \U0001f36a!"
-        )
-        return
-
-    elif action == "balance":
-        if is_admin(callback.from_user.id):
-            await callback.answer()
-            return
-        anon_id = int(parts[1])
-        bal = db.get_cookies(anon_id)
-        await callback.answer()
-        await callback.message.answer(f"\U0001f4b0 <b>Ваш баланс:</b> {bal} \U0001f36a")
-        return
-
-    elif action == "top_secrets":
-        await callback.answer()
-        top = db.get_top_secrets()
-        if not top:
-            text = "\U0001f51d <b>Топ секретов пока пуст.</b>"
-        else:
-            lines = ["\U0001f51d <b>Топ секретов</b>\n"]
-            for i, s in enumerate(top, 1):
-                lines.append(f"{i}. {esc(s['text'][:200])}")
-            text = "\n".join(lines)
-        await callback.message.answer(text)
-        return
-
     elif action == "none":
         if not is_admin(callback.from_user.id):
             await callback.answer()
@@ -1624,44 +1579,6 @@ async def _handle_callback(callback: CallbackQuery):
         except Exception:
             pass
 
-    # ── Admin casino callbacks ──
-
-    elif action == "secret_accept":
-        secret_id = int(parts[1])
-        cookies = int(parts[2])
-        secret = db.get_secret(secret_id)
-        if not secret:
-            await callback.answer("❌ Секрет не найден.", show_alert=True)
-            return
-        db.accept_secret(secret_id, cookies)
-        db.add_cookies(secret["anon_id"], cookies)
-        await callback.answer(f"✅ Секрет принят, выдано {cookies} 🍪")
-        await callback.message.edit_text(f"✅ Секрет #{secret_id} принят. Пользователь получил {cookies} 🍪.")
-        try:
-            await bot.send_message(secret["user_id"], f"✅ <b>Cookie принял ваш секрет!</b>\n\nВы получили {cookies} 🍪.")
-        except Exception:
-            pass
-        return
-
-    elif action == "secret_reject":
-        secret_id = int(parts[1])
-        secret_reject_awaiting = secret_id
-        await callback.answer("✏️ Напишите комментарий к отклонению.")
-        await callback.message.answer(
-            f"✏️ <b>Напишите комментарий</b> для отклонения секрета #{secret_id}.\n"
-            "Пользователь увидит этот комментарий.\n"
-            "/cancel — отменить"
-        )
-        return
-
-    elif action == "secret_top":
-        secret_id = int(parts[1])
-        sec = db.get_secret(secret_id)
-        db.accept_secret(secret_id, row_get(sec, "cookies_awarded", 0), set_top=True)
-        await callback.answer("✅ Секрет добавлен в топ!")
-        await callback.message.edit_text(f"✅ Секрет #{secret_id} добавлен в Топ секретов.")
-        return
-
 
 BTN_WRITE = "\u270d\ufe0f Написать"
 BTN_HISTORY = "\U0001f4dc История"
@@ -1674,7 +1591,6 @@ BTN_DEL = "\U0001f5d1 Удалить"
 BTN_ADD_ID = "\u2795 Добавить ID"
 BTN_TTT = "\U0001f3ae Крестики-нолики"
 BTN_DICE = "\U0001f3b2 Везение"
-BTN_CASINO = "\U0001f3b0 Казино секретов"
 BTN_BCAST = "\U0001f4e2 Рассылка"
 BTN_HELP = "❓ Помощь"
 BTN_CANCEL = "❌ Отмена"
@@ -1689,7 +1605,7 @@ def admin_cmds_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text=BTN_DELETED), KeyboardButton(text=BTN_BLOCKED)],
             [KeyboardButton(text=BTN_TTT), KeyboardButton(text=BTN_DICE)],
             [KeyboardButton(text=BTN_DEL)],
-            [KeyboardButton(text=BTN_CASINO), KeyboardButton(text=BTN_ADD_ID)],
+            [KeyboardButton(text=BTN_ADD_ID)],
             [KeyboardButton(text=BTN_BCAST)],
             [KeyboardButton(text=BTN_HELP), KeyboardButton(text=BTN_CANCEL)],
         ],
@@ -1699,7 +1615,7 @@ def admin_cmds_keyboard() -> ReplyKeyboardMarkup:
 
 
 BTN_CMDS = {BTN_WRITE, BTN_HISTORY, BTN_STATS, BTN_LIST, BTN_BANNED,
-            BTN_DELETED, BTN_DEL, BTN_BLOCKED, BTN_TTT, BTN_DICE, BTN_CASINO, BTN_ADD_ID, BTN_BCAST, BTN_HELP, BTN_CANCEL}
+            BTN_DELETED, BTN_DEL, BTN_BLOCKED, BTN_TTT, BTN_DICE, BTN_ADD_ID, BTN_BCAST, BTN_HELP, BTN_CANCEL}
 
 
 # ────────────────────────────── Messages ──────────────────────────────
@@ -1825,30 +1741,6 @@ async def handle_user_message(message: Message):
             )
             return
 
-        # ── Handle secret rejection comment ──
-        if secret_reject_awaiting is not None:
-            comment = (message.text or "").strip()
-            if comment:
-                sid = secret_reject_awaiting
-                secret_reject_awaiting = None
-                secret = db.get_secret(sid)
-                if secret:
-                    db.reject_secret(sid, comment)
-                    try:
-                        await bot.send_message(
-                            secret["user_id"],
-                            f"\u274c <b>Ваш секрет неверен.</b>\n\n"
-                            f"Комментарий: {esc(comment[:200])}"
-                        )
-                    except Exception:
-                        pass
-                    await message.answer(f"✅ Секрет #{sid} отклонён. Комментарий отправлен пользователю.")
-                else:
-                    await message.answer("❌ Секрет не найден.")
-            else:
-                await message.answer("❌ Комментарий не может быть пустым.")
-            return
-
         if message.text == BTN_WRITE:
             text, markup = paginated_users_list(1)
             await message.answer("\U0001f447 <b>Выбери пользователя</b> \u2014 нажми \u270d\ufe0f рядом с именем:", reply_markup=markup)
@@ -1961,68 +1853,6 @@ async def handle_user_message(message: Message):
         user.username or "",
         user.language_code or "",
     )
-
-    # ── Casino: user telling a secret (must be after anon_id is defined) ──
-    if user_id in user_telling_secret:
-        msg_text = get_message_text(message)
-        if msg_text.strip():
-            user_telling_secret.discard(user_id)
-            secret_id = db.save_secret(anon_id, user_id, msg_text.strip())
-            await message.answer("✅ Ваш секрет отправлен Cookie на проверку. Ожидайте ответа.")
-            secret_kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="✅ Верный (1🍪)", callback_data=f"secret_accept:{secret_id}:1"),
-                 InlineKeyboardButton(text="✅ Верный (2🍪)", callback_data=f"secret_accept:{secret_id}:2")],
-                [InlineKeyboardButton(text="❌ Неверный", callback_data=f"secret_reject:{secret_id}"),
-                 InlineKeyboardButton(text="\U0001f51d В топ", callback_data=f"secret_top:{secret_id}")],
-            ])
-            await bot.send_message(
-                ADMIN_ID,
-                f"\U0001f4dd <b>Новый секрет</b>\n\n"
-                f"🆔 #{anon_id} {esc(user.first_name or '')}\n"
-                f"Секрет: {esc(msg_text.strip()[:500])}",
-                reply_markup=secret_kb,
-            )
-        else:
-            await message.answer("❌ Секрет не может быть пустым. Напишите секрет.")
-        return
-
-    # ── Casino keyword detection (must be after anon_id defined) ──
-    msg_lower = (message.text or message.caption or "").lower()
-    casino_kw = {"секрет", "казино"}
-    roulette_kw = {"рулетка", "красное", "черное"}
-    balance_kw = {"баланс", "cookies", "печеньки"}
-    top_kw = {"топ секретов", "топ"}
-
-    if any(k in msg_lower for k in casino_kw):
-        bal = db.get_cookies(anon_id)
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="\U0001f4dd Рассказать секрет", callback_data=f"tell_secret:{anon_id}")],
-            [InlineKeyboardButton(text="\U0001f4b0 Баланс", callback_data=f"balance:{anon_id}")],
-            [InlineKeyboardButton(text="\U0001f51d Топ секретов", callback_data="top_secrets")],
-        ])
-        await message.answer(f"\U0001f3b0 <b>Казино секретов</b>\n\nВаш баланс: <b>{bal} 🍪</b>", reply_markup=kb)
-        return
-
-    if any(k in msg_lower for k in roulette_kw):
-        bal = db.get_cookies(anon_id)
-        await message.answer(f"\U0001f3b0 <b>Рулетка</b>\n\nВаш баланс: <b>{bal} 🍪</b>\n\nРулетка пока недоступна. Скоро!")
-        return
-
-    if any(k in msg_lower for k in balance_kw):
-        bal = db.get_cookies(anon_id)
-        await message.answer(f"\U0001f4b0 <b>Ваш баланс:</b> {bal} 🍪")
-        return
-
-    if any(k in msg_lower for k in top_kw):
-        top = db.get_top_secrets()
-        if not top:
-            await message.answer("\U0001f51d <b>Топ секретов пока пуст.</b>")
-        else:
-            lines = ["\U0001f51d <b>Топ секретов</b>\n"]
-            for i, s in enumerate(top, 1):
-                lines.append(f"{i}. {esc(s['text'][:200])}")
-            await message.answer("\n".join(lines))
-        return
 
     last_admin_msg = db.get_last_admin_message(user_id)
     if last_admin_msg:
