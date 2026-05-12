@@ -10,6 +10,7 @@ class Database:
     def _get_conn(self):
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
         return conn
 
     def _init_db(self):
@@ -35,27 +36,45 @@ class Database:
                     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-            # Migration: add language_code if upgrading from old schema
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS games (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    player1_anon_id INTEGER NOT NULL,
+                    player2_anon_id INTEGER NOT NULL,
+                    player1_user_id INTEGER NOT NULL,
+                    player2_user_id INTEGER NOT NULL,
+                    board           TEXT DEFAULT '_________',
+                    current_turn    INTEGER,
+                    x_player        INTEGER,
+                    status          TEXT DEFAULT 'pending',
+                    winner          TEXT DEFAULT '',
+                    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    finished_at     TIMESTAMP
+                )
+            """)
             try:
                 conn.execute("ALTER TABLE users ADD COLUMN language_code TEXT DEFAULT ''")
             except sqlite3.OperationalError:
                 pass
-            # Migration: add direction column to messages
+            try:
+                conn.execute("ALTER TABLE users ADD COLUMN is_deleted INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
             try:
                 conn.execute("ALTER TABLE messages ADD COLUMN direction TEXT DEFAULT 'user_to_admin'")
             except sqlite3.OperationalError:
                 pass
 
-
     def add_user(self, user_id: int, first_name: str = "", username: str = "", language_code: str = "") -> tuple:
         with self._get_conn() as conn:
             existing = conn.execute(
-                "SELECT id, is_banned FROM users WHERE user_id = ?", (user_id,)
+                "SELECT id, is_banned, is_deleted FROM users WHERE user_id = ?", (user_id,)
             ).fetchone()
             if existing:
                 conn.execute("""
                     UPDATE users
-                    SET first_name = ?, username = ?, language_code = ?, last_active = CURRENT_TIMESTAMP
+                    SET first_name = ?, username = ?, language_code = ?, last_active = CURRENT_TIMESTAMP,
+                        is_deleted = 0
                     WHERE user_id = ?
                 """, (first_name, username, language_code, user_id))
                 return existing["id"], existing["is_banned"]
@@ -121,7 +140,13 @@ class Database:
     def get_all_users(self):
         with self._get_conn() as conn:
             return conn.execute(
-                "SELECT * FROM users ORDER BY last_active DESC"
+                "SELECT * FROM users WHERE is_deleted != 1 ORDER BY last_active DESC"
+            ).fetchall()
+
+    def get_deleted_users(self):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM users WHERE is_deleted = 1 ORDER BY last_active DESC"
             ).fetchall()
 
     def get_banned_users(self):
@@ -154,6 +179,14 @@ class Database:
 
     def delete_user(self, anon_id: int):
         with self._get_conn() as conn:
+            conn.execute("UPDATE users SET is_deleted = 1 WHERE id = ?", (anon_id,))
+
+    def restore_user(self, anon_id: int):
+        with self._get_conn() as conn:
+            conn.execute("UPDATE users SET is_deleted = 0 WHERE id = ?", (anon_id,))
+
+    def hard_delete_user(self, anon_id: int):
+        with self._get_conn() as conn:
             user = conn.execute("SELECT user_id FROM users WHERE id = ?", (anon_id,)).fetchone()
             if user:
                 uid = user["user_id"]
@@ -175,11 +208,79 @@ class Database:
 
     def get_stats(self) -> dict:
         with self._get_conn() as conn:
-            total = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+            total = conn.execute("SELECT COUNT(*) FROM users WHERE is_deleted != 1").fetchone()[0]
             banned = conn.execute(
-                "SELECT COUNT(*) FROM users WHERE is_banned = 1"
+                "SELECT COUNT(*) FROM users WHERE is_banned = 1 AND is_deleted != 1"
             ).fetchone()[0]
-            return {"total": total, "banned": banned, "active": total - banned}
+            deleted = conn.execute("SELECT COUNT(*) FROM users WHERE is_deleted = 1").fetchone()[0]
+            return {"total": total, "banned": banned, "active": total - banned, "deleted": deleted}
 
+    # ──────────── Tic-Tac-Toe methods ────────────
 
+    def create_game(self, p1_anon: int, p2_anon: int, p1_uid: int, p2_uid: int, x_player: int) -> int:
+        with self._get_conn() as conn:
+            cursor = conn.execute("""
+                INSERT INTO games (player1_anon_id, player2_anon_id, player1_user_id, player2_user_id,
+                                   board, current_turn, x_player, status)
+                VALUES (?, ?, ?, ?, '_________', ?, ?, 'pending')
+            """, (p1_anon, p2_anon, p1_uid, p2_uid, x_player, x_player))
+            return cursor.lastrowid
 
+    def get_player_game(self, anon_id: int, statuses=("active", "pending")) -> Optional[sqlite3.Row]:
+        with self._get_conn() as conn:
+            placeholders = ",".join("?" for _ in statuses)
+            return conn.execute(f"""
+                SELECT * FROM games
+                WHERE (player1_anon_id = ? OR player2_anon_id = ?)
+                  AND status IN ({placeholders})
+                ORDER BY id DESC LIMIT 1
+            """, (anon_id, anon_id, *statuses)).fetchone()
+
+    def get_game(self, game_id: int) -> Optional[sqlite3.Row]:
+        with self._get_conn() as conn:
+            return conn.execute("SELECT * FROM games WHERE id = ?", (game_id,)).fetchone()
+
+    def update_game(self, game_id: int, **kwargs):
+        with self._get_conn() as conn:
+            sets = ", ".join(f"{k} = ?" for k in kwargs)
+            vals = list(kwargs.values()) + [game_id]
+            conn.execute(f"UPDATE games SET {sets} WHERE id = ?", vals)
+
+    def get_player_stats(self, anon_id: int) -> dict:
+        with self._get_conn() as conn:
+            rows = conn.execute("""
+                SELECT * FROM games
+                WHERE (player1_anon_id = ? OR player2_anon_id = ?)
+                  AND status = 'finished'
+            """, (anon_id, anon_id)).fetchall()
+        wins = losses = draws = 0
+        opponents = set()
+        for r in rows:
+            x = r["x_player"]
+            w = r["winner"]
+            opp = r["player2_anon_id"] if r["player1_anon_id"] == anon_id else r["player1_anon_id"]
+            opponents.add(opp)
+            if w == "draw":
+                draws += 1
+            elif (anon_id == x and w == "X") or (anon_id != x and w == "O"):
+                wins += 1
+            else:
+                losses += 1
+        return {"wins": wins, "losses": losses, "draws": draws, "total": wins + losses + draws, "opponents": len(opponents)}
+
+    def get_game_history(self, anon_id: int, opponent_anon_id: int = None, limit: int = 20) -> list:
+        with self._get_conn() as conn:
+            if opponent_anon_id:
+                return conn.execute("""
+                    SELECT * FROM games
+                    WHERE ((player1_anon_id = ? AND player2_anon_id = ?)
+                        OR (player1_anon_id = ? AND player2_anon_id = ?))
+                      AND status = 'finished'
+                    ORDER BY id DESC LIMIT ?
+                """, (anon_id, opponent_anon_id, opponent_anon_id, anon_id, limit)).fetchall()
+            return conn.execute("""
+                SELECT * FROM games
+                WHERE (player1_anon_id = ? OR player2_anon_id = ?)
+                  AND status = 'finished'
+                ORDER BY id DESC LIMIT ?
+            """, (anon_id, anon_id, limit)).fetchall()

@@ -2,6 +2,8 @@ import asyncio
 import logging
 import html
 import os
+import random
+from datetime import datetime
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -13,21 +15,21 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from config import BOT_TOKEN, ADMIN_ID
 from database import Database
 
-# Track which user the admin is currently replying to (stores anon_id)
 admin_pending_reply: int | None = None
-
-# Track "write to user" two-step flow
-write_flow_step: str | None = None  # "await_id" or "await_text"
+write_flow_step: str | None = None
 write_flow_anon_id: int | None = None
-
-# Track "add user by ID" flow
 add_user_step: bool = False
-
-# Track "rename user" flow
 rename_anon_id: int | None = None
-
-# Track waiting messages: user_id -> message_id of "подождите" message
 waiting_messages: dict[int, int] = {}
+
+TTT_CELL_EMPTY = "\u2b1c"
+TTT_CELL_X = "\u274c"
+TTT_CELL_O = "\u2b55"
+
+GAME_KEYWORDS = {"игра", "ttt", "крестики", "нолики", "хочу играть", "поиграем", "давай поиграем", "сыграем"}
+
+# TTT game message tracking: game_id -> admin's last board message_id
+ttt_admin_msg_ids: dict[int, int] = {}
 
 
 async def delete_waiting(target_user_id: int):
@@ -45,31 +47,31 @@ def get_message_text(message: Message) -> str:
 
 def get_content_type_label(message: Message) -> str | None:
     if message.sticker:
-        return "🃏 <b>Стикер</b>"
+        return "\U0001f383 <b>Стикер</b>"
     if message.photo:
-        return "📷 <b>Фото</b>"
+        return "\U0001f4f7 <b>Фото</b>"
     if message.video:
-        return "🎬 <b>Видео</b>"
+        return "\U0001f3ac <b>Видео</b>"
     if message.animation:
-        return "🎞️ <b>GIF</b>"
+        return "\U0001f99e <b>GIF</b>"
     if message.voice:
-        return "🎤 <b>Голосовое</b>"
+        return "\U0001f3a4 <b>Голосовое</b>"
     if message.video_note:
-        return "📹 <b>Видеосообщение</b>"
+        return "\U0001f4f9 <b>Видеосообщение</b>"
     if message.audio:
-        return "🎵 <b>Аудио</b>"
+        return "\U0001f3b5 <b>Аудио</b>"
     if message.document:
-        return "📎 <b>Документ</b>"
+        return "\U0001f4ce <b>Документ</b>"
     if message.location:
-        return "📍 <b>Геопозиция</b>"
+        return "\U0001f4cd <b>Геопозиция</b>"
     if message.contact:
-        return "👤 <b>Контакт</b>"
+        return "\U0001f464 <b>Контакт</b>"
     if message.poll:
-        return "📊 <b>Опрос</b>"
+        return "\U0001f4ca <b>Опрос</b>"
     if message.dice:
-        return "🎲 <b>Dice</b>"
+        return "\U0001f3b2 <b>Dice</b>"
     if message.venue:
-        return "🏛 <b>Место</b>"
+        return "\U0001f3db <b>Место</b>"
     return None
 
 
@@ -112,7 +114,7 @@ async def forward_media(chat_id: int, message: Message, caption: str = "", reply
         return
     if message.poll:
         p = message.poll
-        await bot.send_message(chat_id, f"📊 <b>Опрос:</b> {esc(p.question)}", reply_markup=reply_markup)
+        await bot.send_message(chat_id, f"\U0001f4ca <b>Опрос:</b> {esc(p.question)}", reply_markup=reply_markup)
         return
     if message.dice:
         return await bot.send_dice(chat_id, emoji=message.dice.emoji, reply_markup=reply_markup)
@@ -142,6 +144,7 @@ dp = Dispatcher()
 db_path = os.getenv("DB_PATH", "bot.db")
 db = Database(db_path)
 db.add_user(ADMIN_ID, ADMIN_NAME, "", "")
+ADMIN_ANON_ID: int = db.get_anon_id_by_user_id(ADMIN_ID) or 1
 
 
 def esc(text: str) -> str:
@@ -152,16 +155,214 @@ def is_admin(user_id: int) -> bool:
     return user_id == ADMIN_ID
 
 
-def user_actions_keyboard(anon_id: int, is_banned: bool = False) -> InlineKeyboardBuilder:
+def get_opponent_anon(game, my_anon: int) -> int:
+    return game["player2_anon_id"] if game["player1_anon_id"] == my_anon else game["player1_anon_id"]
+
+
+def get_opponent_user_id(game, my_anon: int) -> int:
+    return game["player2_user_id"] if game["player1_anon_id"] == my_anon else game["player1_user_id"]
+
+
+def user_actions_keyboard(anon_id: int, is_banned: bool = False, show_ttt: bool = False) -> InlineKeyboardBuilder:
     builder = InlineKeyboardBuilder()
-    builder.button(text="✍️ Ответить", callback_data=f"reply:{anon_id}")
-    builder.button(text="🆔 Инфо", callback_data=f"info:{anon_id}")
+    builder.button(text="\u270d\ufe0f Ответить", callback_data=f"reply:{anon_id}")
+    builder.button(text="\U0001f194 Инфо", callback_data=f"info:{anon_id}")
     if is_banned:
-        builder.button(text="✅ Разблокировать", callback_data=f"unban:{anon_id}")
+        builder.button(text="\u2705 Разблокировать", callback_data=f"unban:{anon_id}")
     else:
-        builder.button(text="🚫 Заблокировать", callback_data=f"ban:{anon_id}")
+        builder.button(text="\U0001f6ab Заблокировать", callback_data=f"ban:{anon_id}")
+    builder.button(text="\U0001f5d1 Удалить", callback_data=f"del_ask:{anon_id}")
+    if show_ttt:
+        builder.button(text="\U0001f3ae Играть", callback_data=f"ttt_challenge:{anon_id}")
     builder.adjust(1)
     return builder
+
+
+# ═══════════════════════ Tic-Tac-Toe ═══════════════════════
+
+def ttt_render_cell(board: str, pos: int) -> str:
+    ch = board[pos]
+    if ch == "X":
+        return TTT_CELL_X
+    if ch == "O":
+        return TTT_CELL_O
+    return TTT_CELL_EMPTY
+
+
+def ttt_build_keyboard(game, anon_id: int, can_move: bool) -> InlineKeyboardMarkup:
+    board = game["board"]
+    rows = []
+    for r in range(3):
+        row = []
+        for c in range(3):
+            pos = r * 3 + c
+            cell = ttt_render_cell(board, pos)
+            empty = board[pos] == "_"
+            if empty and can_move:
+                row.append(InlineKeyboardButton(text=cell, callback_data=f"ttt_move:{game['id']}:{pos}"))
+            else:
+                row.append(InlineKeyboardButton(text=cell, callback_data="none"))
+        rows.append(row)
+    rows.append([
+        InlineKeyboardButton(text="\U0001f504 Реванш", callback_data=f"ttt_rematch:{game['id']}"),
+        InlineKeyboardButton(text="\u26d4 Сдаюсь", callback_data=f"ttt_surrender:{game['id']}"),
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def ttt_board_text(board: str) -> str:
+    lines = []
+    for r in range(3):
+        cells = [ttt_render_cell(board, r * 3 + c) for c in range(3)]
+        lines.append(" ".join(cells))
+    return "\n".join(lines)
+
+
+def ttt_check_winner(board: str) -> str:
+    wins = [
+        (0,1,2), (3,4,5), (6,7,8),
+        (0,3,6), (1,4,7), (2,5,8),
+        (0,4,8), (2,4,6),
+    ]
+    for a, b, c in wins:
+        if board[a] != "_" and board[a] == board[b] == board[c]:
+            return board[a]
+    if "_" not in board:
+        return "draw"
+    return ""
+
+
+def ttt_game_message(game) -> str:
+    board = game["board"]
+    x_aid = game["x_player"]
+    o_aid = game["player2_anon_id"] if game["player1_anon_id"] == x_aid else game["player1_anon_id"]
+    x_name = f"#{x_aid}" if x_aid != ADMIN_ANON_ID else ADMIN_NAME
+    o_name = f"#{o_aid}" if o_aid != ADMIN_ANON_ID else ADMIN_NAME
+    turn_aid = game["current_turn"]
+    turn_name = ADMIN_NAME if turn_aid == ADMIN_ANON_ID else f"#{turn_aid}"
+    turn_mark = "X" if turn_aid == game["x_player"] else "O"
+
+    lines = [
+        "\U0001f3ae <b>Крестики-нолики</b>",
+        f"X — {x_name}",
+        f"O — {o_name}",
+        "",
+        ttt_board_text(board),
+    ]
+    if game["status"] == "active":
+        lines.extend(["", f"\U0001f449 Ход: <b>{turn_name}</b> ({turn_mark})"])
+    elif game["status"] == "finished":
+        w = game["winner"]
+        if w == "draw":
+            lines.extend(["", "\U0001f91d <b>Ничья!</b>"])
+        else:
+            w_aid = game["x_player"] if w == "X" else o_aid
+            w_name = ADMIN_NAME if w_aid == ADMIN_ANON_ID else f"#{w_aid}"
+            lines.extend(["", f"\U0001f3c6 <b>Победил: {w_name}</b>"])
+    return "\n".join(lines)
+
+
+def ttt_game_list(page: int = 1):
+    users = [u for u in db.get_all_users() if u["id"] != ADMIN_ANON_ID]
+    if not users:
+        return "\U0001f4ad Нет пользователей для игры.", None
+    total_pages = max(1, (len(users) + USERS_PER_PAGE - 1) // USERS_PER_PAGE)
+    page = max(1, min(page, total_pages))
+    start = (page - 1) * USERS_PER_PAGE
+    end = start + USERS_PER_PAGE
+    page_users = users[start:end]
+
+    lines = [f"\U0001f3ae <b>Выбери соперника</b> (стр. {page}/{total_pages}):\n"]
+    for u in page_users:
+        name = esc(u["first_name"] or "—")
+        uname = f" @{esc(u['username'])}" if u["username"] else ""
+        lines.append(f"\U0001f539 #<b>{u['id']}</b> — {name}{uname}")
+    text = "\n".join(lines)
+
+    rows = []
+    for u in page_users:
+        label = (u["first_name"] or f"#{u['id']}")[:14]
+        rows.append([InlineKeyboardButton(text=f"\U0001f3ae {label}", callback_data=f"ttt_challenge:{u['id']}")])
+
+    if total_pages > 1:
+        nav = []
+        if page > 1:
+            nav.append(InlineKeyboardButton(text="\u2b05\ufe0f", callback_data=f"ttt_pgn:{page - 1}"))
+        nav.append(InlineKeyboardButton(text=f"\U0001f4c4 {page}/{total_pages}", callback_data="none"))
+        if page < total_pages:
+            nav.append(InlineKeyboardButton(text="\u27a1\ufe0f", callback_data=f"ttt_pgn:{page + 1}"))
+        rows.append(nav)
+    rows.append([InlineKeyboardButton(text="\U0001f4ca Моя статистика", callback_data="ttt_my_stats")])
+
+    return text, InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def ttt_send_board(game):
+    p1_uid = game["player1_user_id"]
+    p2_uid = game["player2_user_id"]
+    p1_aid = game["player1_anon_id"]
+    p2_aid = game["player2_anon_id"]
+    is_admin_p1 = p1_aid == ADMIN_ANON_ID
+    admin_uid = p1_uid if is_admin_p1 else p2_uid
+    user_uid = p2_uid if is_admin_p1 else p1_uid
+    admin_aid = p1_aid if is_admin_p1 else p2_aid
+    user_aid = p2_aid if is_admin_p1 else p1_aid
+    admin_can_move = game["current_turn"] == admin_aid and game["status"] == "active"
+    user_can_move = game["current_turn"] == user_aid and game["status"] == "active"
+    text = ttt_game_message(game)
+    admin_kb = ttt_build_keyboard(game, admin_aid, admin_can_move)
+    user_kb = ttt_build_keyboard(game, user_aid, user_can_move)
+    gid = game["id"]
+    last_id = ttt_admin_msg_ids.get(gid)
+    if last_id:
+        try:
+            await bot.edit_message_text(text, admin_uid, last_id, reply_markup=admin_kb)
+        except Exception:
+            msg = await bot.send_message(admin_uid, text, reply_markup=admin_kb)
+            ttt_admin_msg_ids[gid] = msg.message_id
+    else:
+        msg = await bot.send_message(admin_uid, text, reply_markup=admin_kb)
+        ttt_admin_msg_ids[gid] = msg.message_id
+    try:
+        await bot.send_message(user_uid, text, reply_markup=user_kb)
+    except Exception:
+        await bot.send_message(admin_uid, f"\u274c Не удалось отправить сообщение пользователю #{user_aid}.")
+
+
+async def ttt_start_game(game_id: int):
+    game = db.get_game(game_id)
+    if not game or game["status"] != "pending":
+        return
+    x_player = random.choice([game["player1_anon_id"], game["player2_anon_id"]])
+    db.update_game(game_id, status="active", x_player=x_player, current_turn=x_player, board="_________")
+    game = db.get_game(game_id)
+    await ttt_send_board(game)
+
+
+async def ttt_process_move(game_id: int, anon_id: int, position: int):
+    game = db.get_game(game_id)
+    if not game or game["status"] != "active":
+        return False, "Игра уже завершена."
+    if game["current_turn"] != anon_id:
+        return False, "Сейчас не ваш ход."
+    board = list(game["board"])
+    if board[position] != "_":
+        return False, "Ячейка уже занята."
+    mark = "X" if anon_id == game["x_player"] else "O"
+    board[position] = mark
+    new_board = "".join(board)
+    winner = ttt_check_winner(new_board)
+    if winner:
+        result = "finished"
+        db.update_game(game_id, board=new_board, status=result, winner=winner, finished_at=datetime.now().isoformat())
+        game = db.get_game(game_id)
+        await ttt_send_board(game)
+        return True, None
+    next_turn = game["player2_anon_id"] if game["current_turn"] == game["player1_anon_id"] else game["player1_anon_id"]
+    db.update_game(game_id, board=new_board, current_turn=next_turn)
+    game = db.get_game(game_id)
+    await ttt_send_board(game)
+    return True, None
 
 
 # ────────────────────────────── Users ──────────────────────────────
@@ -176,14 +377,15 @@ async def cmd_start(message: Message):
             message.from_user.language_code or "",
         )
         await message.answer(
-            f"🍪 <b>Добро пожаловать, {ADMIN_NAME}!</b>\n\n"
+            f"\U0001f36a <b>Добро пожаловать, {ADMIN_NAME}!</b>\n\n"
             "Бот для анонимных сообщений запущен.\n"
-            "Пользователи пишут боту — ты видишь их сообщения "
+            "Пользователи пишут боту \u2014 ты видишь их сообщения "
             "с анонимным ID и можешь отвечать.\n\n"
-            "Нажимай <b>✍️ Ответить</b> под сообщением — "
+            "Нажимай <b>\u270d\ufe0f Ответить</b> под сообщением \u2014 "
             "и просто пиши текст, без команд!\n\n"
-            "📜 <b>История</b> — все сообщения за последний час.\n\n"
-            "📌 Кнопки внизу — быстрый доступ к командам.",
+            "\U0001f4dc <b>История</b> \u2014 все сообщения за последний час.\n\n"
+            "\U0001f3ae <b>Крестики-нолики</b> \u2014 играй с пользователями!\n\n"
+            "\U0001f4cc Кнопки внизу \u2014 быстрый доступ ко всем функциям.",
             reply_markup=admin_cmds_keyboard(),
         )
         return
@@ -196,12 +398,14 @@ async def cmd_start(message: Message):
     )
 
     await message.answer(
-        "👋 <b>Привет! Я анонимный бот.</b>\n\n"
+        "\U0001f44b <b>Привет! Я анонимный бот.</b>\n\n"
         "Ты можешь написать мне любое сообщение, "
         f"и я передам его <b>{ADMIN_NAME}</b> <b>анонимно</b>.\n"
         "Никто не узнает твой Telegram ID или личные данные.\n\n"
         f"Твой анонимный номер: <b>#{anon_id}</b>\n\n"
-        "Просто напиши что-нибудь ниже ✉️",
+        "Просто напиши что-нибудь ниже \u2709\ufe0f\n\n"
+        "\U0001f3ae <b>Хочешь сыграть в крестики-нолики?</b>\n"
+        "Напиши \u00abигра\u00bb или \u00abttt\u00bb и я передам вызов!",
     )
 
 
@@ -231,14 +435,14 @@ async def cmd_find(message: Message):
             await message.answer(
                 f"ℹ️ Пользователь @{esc(target)} уже в БД.\n"
                 f"🆔 Анонимный ID: <b>#{anon_id}</b>\n"
-                f"👤 {esc(chat.first_name or '—')}"
+                f"👤 {esc(chat.first_name or '\u2014')}"
             )
         else:
             anon_id, _ = db.add_user(uid, chat.first_name or "", chat.username or "", chat.language_code or "")
             await message.answer(
                 f"✅ Пользователь @{esc(target)} добавлен!\n"
                 f"🆔 Анонимный ID: <b>#{anon_id}</b>\n"
-                f"👤 {esc(chat.first_name or '—')}"
+                f"👤 {esc(chat.first_name or '\u2014')}"
             )
     except Exception as e:
         await message.answer(f"❌ Не удалось найти @{esc(target)}: {esc(str(e)[:200])}")
@@ -248,26 +452,28 @@ async def cmd_find(message: Message):
 async def cmd_help(message: Message):
     if is_admin(message.from_user.id):
         await message.answer(
-            f"🔧 <b>Команды {ADMIN_NAME}:</b>\n\n"
-            "✍️ <b>Написать</b> — выбрать пользователя и написать\n\n"
-            "📜 <b>История</b> — все сообщения за последний час\n"
-            "   <code>/history 30</code> — за 30 минут\n\n"
-            "📊 <b>Статистика</b> — статистика бота\n\n"
-            "👥 <b>Список</b> — список пользователей\n\n"
-            "➕ <b>Добавить ID</b> — добавить пользователя по Telegram ID\n\n"
-            "🔍 <code>/find @user</code> — найти/добавить по юзернейму\n\n"
-            "📢 <b>Рассылка</b> — написать всем\n\n"
-            "❌ <b>Отмена</b> — отменить текущее действие",
+            f"\U0001f527 <b>Команды {ADMIN_NAME}:</b>\n\n"
+            "\u270d\ufe0f <b>Написать</b> \u2014 выбрать пользователя и написать\n\n"
+            "\U0001f4dc <b>История</b> \u2014 все сообщения за последний час\n"
+            "   <code>/history 30</code> \u2014 за 30 минут\n\n"
+            "\U0001f4ca <b>Статистика</b> \u2014 статистика бота\n\n"
+            "\U0001f464 <b>Список</b> \u2014 список пользователей\n\n"
+            "\u2795 <b>Добавить ID</b> \u2014 добавить пользователя по Telegram ID\n\n"
+            "\U0001f50d <code>/find @user</code> \u2014 найти/добавить по юзернейму\n\n"
+            "\U0001f4e2 <b>Рассылка</b> \u2014 написать всем\n\n"
+            "\U0001f3ae <b>Крестики-нолики</b> \u2014 игра с пользователями\n\n"
+            "\u274c <b>Отмена</b> \u2014 отменить текущее действие",
             reply_markup=admin_cmds_keyboard(),
         )
     else:
         await message.answer(
-            f"🤖 <b>Как это работает</b>\n\n"
+            f"\U0001f916 <b>Как это работает</b>\n\n"
             "1. Ты отправляешь мне сообщение\n"
             f"2. Я анонимно передаю его <b>{ADMIN_NAME}</b>\n"
             f"3. <b>{ADMIN_NAME}</b> может ответить\n"
             "4. Я передаю ответ тебе\n\n"
-            "Всё полностью анонимно 🔒"
+            "Всё полностью анонимно \U0001f512\n\n"
+            "\U0001f3ae Напиши <b>игра</b> или <b>ttt</b> чтобы сыграть в крестики-нолики!"
         )
 
 
@@ -291,7 +497,6 @@ async def cmd_reply(message: Message):
     global admin_pending_reply, write_flow_step, write_flow_anon_id
     if not is_admin(message.from_user.id):
         return
-
     parts = message.text.split(maxsplit=2)
     if len(parts) < 3:
         await message.answer(
@@ -299,20 +504,16 @@ async def cmd_reply(message: Message):
             "Используй: <code>/reply &lt;id&gt; &lt;текст&gt;</code>"
         )
         return
-
     try:
         anon_id = int(parts[1])
     except ValueError:
         await message.answer("❌ ID должен быть числом.")
         return
-
     target_user_id = db.get_user_id_by_anon(anon_id)
     if target_user_id is None:
         await message.answer(f"❌ Пользователь #{anon_id} не найден.")
         return
-
     reply_text = parts[2]
-
     admin_pending_reply = None
     write_flow_step = None
     write_flow_anon_id = None
@@ -320,7 +521,7 @@ async def cmd_reply(message: Message):
     try:
         await bot.send_message(
             target_user_id,
-            f"✉️ <b>Ответ от {ADMIN_NAME}:</b>\n\n{esc(reply_text)}",
+            f"\u2709\ufe0f <b>Ответ от {ADMIN_NAME}:</b>\n\n{esc(reply_text)}",
         )
         db.save_message(target_user_id, anon_id, reply_text, direction="admin_to_user")
         await message.answer(f"✅ Ответ отправлен пользователю #{anon_id}!")
@@ -332,38 +533,32 @@ async def cmd_reply(message: Message):
 async def cmd_ban(message: Message):
     if not is_admin(message.from_user.id):
         return
-
     try:
         anon_id = int(message.text.split()[1])
     except (IndexError, ValueError):
         await message.answer("❌ Используй: <code>/ban &lt;id&gt;</code>")
         return
-
     target_user_id = db.get_user_id_by_anon(anon_id)
     if target_user_id is None:
         await message.answer(f"❌ Пользователь #{anon_id} не найден.")
         return
-
     db.ban_user(target_user_id)
-    await message.answer(f"🚫 Пользователь #{anon_id} заблокирован.")
+    await message.answer(f"\U0001f6ab Пользователь #{anon_id} заблокирован.")
 
 
 @dp.message(Command("unban"))
 async def cmd_unban(message: Message):
     if not is_admin(message.from_user.id):
         return
-
     try:
         anon_id = int(message.text.split()[1])
     except (IndexError, ValueError):
         await message.answer("❌ Используй: <code>/unban &lt;id&gt;</code>")
         return
-
     target_user_id = db.get_user_id_by_anon(anon_id)
     if target_user_id is None:
         await message.answer(f"❌ Пользователь #{anon_id} не найден.")
         return
-
     db.unban_user(target_user_id)
     await message.answer(f"✅ Пользователь #{anon_id} разблокирован.")
 
@@ -372,58 +567,56 @@ async def cmd_unban(message: Message):
 async def cmd_stats(message: Message):
     if not is_admin(message.from_user.id):
         return
-
     stats = db.get_stats()
+    ttt_stats = db.get_player_stats(ADMIN_ANON_ID)
     await message.answer(
-        f"📊 <b>Статистика бота</b>\n\n"
+        f"\U0001f4ca <b>Статистика бота</b>\n\n"
         f"👥 Всего: <b>{stats['total']}</b>\n"
-        f"🚫 Заблокировано: <b>{stats['banned']}</b>\n"
-        f"✅ Активных: <b>{stats['active']}</b>"
+        f"\U0001f6ab Заблокировано: <b>{stats['banned']}</b>\n"
+        f"✅ Активных: <b>{stats['active']}</b>\n"
+        f"\U0001f5d1 Удалённых: <b>{stats['deleted']}</b>\n\n"
+        f"\U0001f3ae <b>Крестики-нолики</b>\n"
+        f"🏆 Побед: <b>{ttt_stats['wins']}</b>\n"
+        f"\U0001f4a5 Поражений: <b>{ttt_stats['losses']}</b>\n"
+        f"\U0001f91d Ничьих: <b>{ttt_stats['draws']}</b>\n"
+        f"👥 Соперников: <b>{ttt_stats['opponents']}</b>"
     )
 
 
 def paginated_users_list(page: int = 1, action: str = "wrt", nav_prefix: str = "pgn"):
     users = db.get_all_users()
     if not users:
-        return "📭 Нет пользователей.", None
-
+        return "\U0001f4ad Нет пользователей.", None
     total_pages = max(1, (len(users) + USERS_PER_PAGE - 1) // USERS_PER_PAGE)
     page = max(1, min(page, total_pages))
     start = (page - 1) * USERS_PER_PAGE
     end = start + USERS_PER_PAGE
     page_users = users[start:end]
-
-    action_icon = "✍️"
-    title = "👥 <b>Пользователи</b>"
+    is_del_mode = action == "del_ask"
+    action_icon = "\U0001f5d1" if is_del_mode else "\u270d\ufe0f"
+    title = "\U0001f5d1 <b>Удаление пользователей</b>" if is_del_mode else "\U0001f464 <b>Пользователи</b>"
     lines = [f"{title} (стр. {page}/{total_pages}):\n"]
     for u in page_users:
-        ban_icon = "🚫" if u["is_banned"] else "✅"
-        name = esc(u["first_name"] or "—")
+        ban_icon = "\U0001f6ab" if u["is_banned"] else "✅"
+        name = esc(u["first_name"] or "\u2014")
         username = f" @{esc(u['username'])}" if u["username"] else ""
-        lines.append(f"{ban_icon} #<b>{u['id']}</b> — {name}{username}")
-
+        lines.append(f"{ban_icon} #<b>{u['id']}</b> \u2014 {name}{username}")
     text = "\n".join(lines)
-
     rows = []
-    row = []
     for u in page_users:
         label = (u["first_name"] or f"#{u['id']}")[:14]
-        row.append(InlineKeyboardButton(text=f"{action_icon} {label}", callback_data=f"{action}:{u['id']}"))
-        if len(row) == 2:
-            rows.append(row)
-            row = []
-    if row:
+        row = [InlineKeyboardButton(text=f"{action_icon} {label}", callback_data=f"{action}:{u['id']}")]
+        if not is_del_mode:
+            row.append(InlineKeyboardButton(text="\U0001f5d1", callback_data=f"del_ask:{u['id']}"))
         rows.append(row)
-
     if total_pages > 1:
         nav = []
         if page > 1:
-            nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"{nav_prefix}:{page - 1}"))
-        nav.append(InlineKeyboardButton(text=f"📄 {page}/{total_pages}", callback_data="none"))
+            nav.append(InlineKeyboardButton(text="\u2b05\ufe0f", callback_data=f"{nav_prefix}:{page - 1}"))
+        nav.append(InlineKeyboardButton(text=f"\U0001f4c4 {page}/{total_pages}", callback_data="none"))
         if page < total_pages:
-            nav.append(InlineKeyboardButton(text="➡️", callback_data=f"{nav_prefix}:{page + 1}"))
+            nav.append(InlineKeyboardButton(text="\u27a1\ufe0f", callback_data=f"{nav_prefix}:{page + 1}"))
         rows.append(nav)
-
     return text, InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -438,18 +631,15 @@ async def cmd_list(message: Message):
 def banned_users_list():
     users = db.get_banned_users()
     if not users:
-        return "🚫 <b>Нет заблокированных пользователей.</b>", None
+        return "\U0001f6ab <b>Нет заблокированных пользователей.</b>", None
     kb = InlineKeyboardBuilder()
     for u in users:
-        name = esc(u["first_name"] or "—")
+        name = esc(u["first_name"] or "\u2014")
         uname = f" @{esc(u['username'])}" if u["username"] else ""
-        kb.button(
-            text=f"#{u['id']} — {name}{uname}",
-            callback_data=f"info:{u['id']}",
-        )
+        kb.button(text=f"#{u['id']} \u2014 {name}{uname}", callback_data=f"info:{u['id']}")
     kb.adjust(1)
     return (
-        f"🚫 <b>Заблокированные пользователи</b> ({len(users)}):\n\n"
+        f"\U0001f6ab <b>Заблокированные пользователи</b> ({len(users)}):\n\n"
         "Нажми на пользователя, чтобы управлять им.",
         kb.as_markup(),
     )
@@ -462,49 +652,78 @@ async def cmd_banned(message: Message):
     await message.answer(text, reply_markup=markup)
 
 
+def deleted_users_list():
+    users = db.get_deleted_users()
+    if not users:
+        return "\U0001f5d1 <b>Нет удалённых пользователей.</b>", None
+    kb = InlineKeyboardBuilder()
+    for u in users:
+        name = esc(u["first_name"] or "\u2014")
+        uname = f" @{esc(u['username'])}" if u["username"] else ""
+        kb.button(text=f"#{u['id']} \u2014 {name}{uname}", callback_data=f"info:{u['id']}")
+    kb.adjust(1)
+    return (
+        f"\U0001f5d1 <b>Удалённые пользователи</b> ({len(users)}):\n\n"
+        "Нажми на пользователя, чтобы управлять им.",
+        kb.as_markup(),
+    )
+
+
+async def cmd_deleted(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    text, markup = deleted_users_list()
+    await message.answer(text, reply_markup=markup)
+
+
 @dp.message(Command("user"))
 async def cmd_user(message: Message):
     if not is_admin(message.from_user.id):
         return
-
     try:
         anon_id = int(message.text.split()[1])
     except (IndexError, ValueError):
         await message.answer("❌ Используй: <code>/user &lt;id&gt;</code>")
         return
-
     u = db.get_user_by_anon(anon_id)
     if u is None:
         await message.answer(f"❌ Пользователь #{anon_id} не найден.")
         return
-
-    name = esc(u["first_name"] or "—")
-    username = f"@{esc(u['username'])}" if u["username"] else "—"
-    lang = u["language_code"] or "—"
-    created = u["created_at"][:16] if u["created_at"] else "—"
-    last = u["last_active"][:16] if u["last_active"] else "—"
-    status = "🚫 Заблокирован" if u["is_banned"] else "✅ Активен"
-
+    name = esc(u["first_name"] or "\u2014")
+    username = f"@{esc(u['username'])}" if u["username"] else "\u2014"
+    lang = u["language_code"] or "\u2014"
+    created = u["created_at"][:16] if u["created_at"] else "\u2014"
+    last = u["last_active"][:16] if u["last_active"] else "\u2014"
+    is_del = u.get("is_deleted") or 0
+    if is_del:
+        status = "\U0001f5d1 Удалён"
+    elif u["is_banned"]:
+        status = "\U0001f6ab Заблокирован"
+    else:
+        status = "✅ Активен"
     text = (
         f"👤 <b>Пользователь #{anon_id}</b>\n\n"
         f"👤 Имя: {name}\n"
-        f"🔗 Юзернейм: {username}\n"
-        f"🌐 Язык: {lang}\n"
-        f"📅 Создан: {created}\n"
-        f"🕐 Активен: {last}\n"
-        f"📌 Статус: {status}"
+        f"\U0001f517 Юзернейм: {username}\n"
+        f"\U0001f310 Язык: {lang}\n"
+        f"\U0001f4c5 Создан: {created}\n"
+        f"\U0001f550 Активен: {last}\n"
+        f"\U0001f4cc Статус: {status}"
     )
-
     kb = InlineKeyboardBuilder()
-    kb.button(text="✍️ Написать", callback_data=f"reply:{anon_id}")
-    kb.button(text="✏️ Изменить имя", callback_data=f"rename:{anon_id}")
-    if u["is_banned"]:
-        kb.button(text="✅ Разблокировать", callback_data=f"unban:{anon_id}")
+    if is_del:
+        kb.button(text="✅ Восстановить", callback_data=f"restore:{anon_id}")
+        kb.button(text="\U0001f5d1 Удалить навсегда", callback_data=f"hard_del_ask:{anon_id}")
     else:
-        kb.button(text="🚫 Заблокировать", callback_data=f"ban:{anon_id}")
-    kb.button(text="🗑 Удалить", callback_data=f"del_ask:{anon_id}")
+        kb.button(text="\u270d\ufe0f Написать", callback_data=f"reply:{anon_id}")
+        kb.button(text="\u270f\ufe0f Изменить имя", callback_data=f"rename:{anon_id}")
+        if u["is_banned"]:
+            kb.button(text="✅ Разблокировать", callback_data=f"unban:{anon_id}")
+        else:
+            kb.button(text="\U0001f6ab Заблокировать", callback_data=f"ban:{anon_id}")
+        kb.button(text="\U0001f5d1 Удалить", callback_data=f"del_ask:{anon_id}")
+        kb.button(text="\U0001f3ae Играть", callback_data=f"ttt_challenge:{anon_id}")
     kb.adjust(1)
-
     await message.answer(text, reply_markup=kb.as_markup())
 
 
@@ -512,34 +731,29 @@ async def cmd_user(message: Message):
 async def cmd_broadcast(message: Message):
     if not is_admin(message.from_user.id):
         return
-
     try:
         text = message.text.split(maxsplit=1)[1]
     except IndexError:
         await message.answer("❌ Используй: <code>/broadcast &lt;текст&gt;</code>")
         return
-
     users = db.get_all_users()
     sent = 0
     failed = 0
-
-    status = await message.answer("📢 Рассылка началась...")
-
+    status = await message.answer("\U0001f4e2 Рассылка началась...")
     for u in users:
         if u["is_banned"]:
             continue
         try:
             await bot.send_message(
                 u["user_id"],
-                f"📢 <b>Сообщение от {ADMIN_NAME}:</b>\n\n{esc(text)}",
+                f"\U0001f4e2 <b>Сообщение от {ADMIN_NAME}:</b>\n\n{esc(text)}",
             )
             sent += 1
             await asyncio.sleep(0.03)
         except Exception:
             failed += 1
-
     await status.edit_text(
-        f"📢 <b>Рассылка завершена</b>\n\n"
+        f"\U0001f4e2 <b>Рассылка завершена</b>\n\n"
         f"✅ Доставлено: <b>{sent}</b>\n"
         f"❌ Ошибок: <b>{failed}</b>"
     )
@@ -549,7 +763,6 @@ async def cmd_broadcast(message: Message):
 async def cmd_history(message: Message):
     if not is_admin(message.from_user.id):
         return
-
     parts = message.text.split()
     minutes = 60
     if len(parts) > 1:
@@ -557,13 +770,11 @@ async def cmd_history(message: Message):
             minutes = int(parts[1])
         except ValueError:
             pass
-
     rows = db.get_messages_since(minutes)
     if not rows:
-        await message.answer(f"📭 За последние <b>{minutes}</b> мин сообщений нет.")
+        await message.answer(f"\U0001f4ad За последние <b>{minutes}</b> мин сообщений нет.")
         return
-
-    lines = [f"📜 <b>Сообщения за последние {minutes} мин:</b>\n"]
+    lines = [f"\U0001f4dc <b>Сообщения за последние {minutes} мин:</b>\n"]
     current_id = None
     for r in rows:
         if r["anon_id"] != current_id:
@@ -571,14 +782,11 @@ async def cmd_history(message: Message):
             name = esc(r["first_name"] or f"#{current_id}")
             username = f" @{esc(r['username'])}" if r["username"] else ""
             time = r["timestamp"][11:16] if r["timestamp"] else ""
-            lines.append(f"\n👤 #{current_id} — {name}{username} ({time}):")
+            lines.append(f"\n👤 #{current_id} \u2014 {name}{username} ({time}):")
         lines.append(f'  "{esc(r["text"] or "")}"')
-
-    # Split if too long
     text = "\n".join(lines)
     if len(text) > 4000:
         text = text[:4000] + "\n\n<i>...сообщение обрезано</i>"
-
     await message.answer(text)
 
 
@@ -592,7 +800,208 @@ async def handle_callback(callback: CallbackQuery):
     action = parts[0]
 
     if not is_admin(callback.from_user.id):
-        await callback.answer(f"❌ Только для {ADMIN_NAME}.", show_alert=True)
+        if action in ("ttt_accept", "ttt_decline", "ttt_move", "ttt_surrender", "ttt_rematch"):
+            pass
+        else:
+            await callback.answer(f"❌ Только для {ADMIN_NAME}.", show_alert=True)
+            return
+
+    # ── TTT callbacks (work for both admin and user) ──
+
+    if action == "ttt_challenge":
+        if not is_admin(callback.from_user.id):
+            await callback.answer(f"❌ Только для {ADMIN_NAME}.", show_alert=True)
+            return
+        anon_id = int(parts[1])
+        if anon_id == ADMIN_ANON_ID:
+            await callback.answer("❌ Нельзя играть с самим собой.", show_alert=True)
+            return
+        admin_game = db.get_player_game(ADMIN_ANON_ID)
+        if admin_game:
+            await callback.answer("❌ Вы уже в игре. Завершите текущую игру.", show_alert=True)
+            return
+        user_game = db.get_player_game(anon_id)
+        if user_game:
+            await callback.answer("❌ Пользователь уже в игре с другим человеком.", show_alert=True)
+            return
+        user = db.get_user_by_anon(anon_id)
+        if not user or user.get("is_deleted"):
+            await callback.answer("❌ Пользователь не найден.", show_alert=True)
+            return
+        target_user_id = user["user_id"]
+        game_id = db.create_game(ADMIN_ANON_ID, anon_id, ADMIN_ID, target_user_id, ADMIN_ANON_ID)
+        await callback.answer()
+        await bot.send_message(
+            ADMIN_ID,
+            f"✅ Ты кинул вызов пользователю #<b>{anon_id}</b>!\n"
+            "Ожидайте ответа..."
+        )
+        accept_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Принять", callback_data=f"ttt_accept:{game_id}"),
+                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"ttt_decline:{game_id}"),
+            ]
+        ])
+        try:
+            await bot.send_message(
+                target_user_id,
+                f"\U0001f3ae <b>Вызов в крестики-нолики!</b>\n\n"
+                f"{ADMIN_NAME} бросает тебе вызов!\n\n"
+                "Нажми <b>✅ Принять</b> чтобы сыграть.\n"
+                "Нажми <b>❌ Отклонить</b> чтобы отказаться.",
+                reply_markup=accept_kb,
+            )
+        except Exception:
+            await bot.send_message(ADMIN_ID, f"❌ Не удалось отправить вызов пользователю #{anon_id}.")
+        return
+
+    elif action == "ttt_accept":
+        game_id = int(parts[1])
+        game = db.get_game(game_id)
+        if not game or game["status"] != "pending":
+            await callback.answer("❌ Вызов уже недействителен.", show_alert=True)
+            return
+        await callback.answer("✅ Вызов принят!")
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        admin_game = db.get_player_game(ADMIN_ANON_ID, statuses=("pending", "active"))
+        if admin_game and admin_game["id"] != game_id:
+            db.update_game(game_id, status="cancelled")
+            await callback.message.answer(
+                "❌ Cookie уже в игре с другим человеком.\nВызов отклонён."
+            )
+            return
+        await bot.send_message(ADMIN_ID, f"✅ Пользователь #<b>{game['player2_anon_id']}</b> принял вызов!\nИгра начинается...")
+        await ttt_start_game(game_id)
+        return
+
+    elif action == "ttt_decline":
+        game_id = int(parts[1])
+        game = db.get_game(game_id)
+        if game and game["status"] == "pending":
+            db.update_game(game_id, status="declined")
+        await callback.answer("❌ Вызов отклонён.")
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        if is_admin(callback.from_user.id):
+            return
+        await bot.send_message(
+            ADMIN_ID,
+            f"❌ Пользователь #<b>{game['player2_anon_id']}</b> отклонил вызов.\n"
+            "Можешь попробовать снова или выбрать другого соперника."
+        )
+        return
+
+    elif action == "ttt_move":
+        game_id = int(parts[1])
+        pos = int(parts[2])
+        anon_id = db.get_anon_id_by_user_id(callback.from_user.id)
+        if anon_id is None:
+            await callback.answer("❌ Вы не зарегистрированы.", show_alert=True)
+            return
+        success, err = await ttt_process_move(game_id, anon_id, pos)
+        if success:
+            await callback.answer()
+        else:
+            await callback.answer(err, show_alert=True)
+        return
+
+    elif action == "ttt_surrender":
+        game_id = int(parts[1])
+        game = db.get_game(game_id)
+        if not game or game["status"] != "active":
+            await callback.answer("❌ Игра уже завершена.", show_alert=True)
+            return
+        anon_id = db.get_anon_id_by_user_id(callback.from_user.id)
+        if anon_id is None:
+            await callback.answer("❌ Ошибка.", show_alert=True)
+            return
+        opp_anon = get_opponent_anon(game, anon_id)
+        winner_mark = "O" if anon_id == game["x_player"] else "X"
+        db.update_game(game_id, status="finished", winner=winner_mark, finished_at=datetime.now().isoformat())
+        game = db.get_game(game_id)
+        await callback.answer("Вы сдались.")
+        await ttt_send_board(game)
+        return
+
+    elif action == "ttt_rematch":
+        game_id = int(parts[1])
+        old_game = db.get_game(game_id)
+        if not old_game:
+            await callback.answer("❌ Игра не найдена.", show_alert=True)
+            return
+        await callback.answer()
+        p1_aid = old_game["player1_anon_id"]
+        p2_aid = old_game["player2_anon_id"]
+        p1_uid = old_game["player1_user_id"]
+        p2_uid = old_game["player2_user_id"]
+        new_id = db.create_game(p1_aid, p2_aid, p1_uid, p2_uid, p1_aid)
+        admin_game = db.get_player_game(ADMIN_ANON_ID, statuses=("pending", "active"))
+        if admin_game and admin_game["id"] != new_id:
+            db.update_game(new_id, status="cancelled")
+            await callback.message.answer("❌ Вы уже в другой игре.")
+            return
+        player_anon = db.get_anon_id_by_user_id(callback.from_user.id)
+        if player_anon is None:
+            return
+        opp_uid = get_opponent_user_id(old_game, player_anon)
+        accept_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Принять", callback_data=f"ttt_accept:{new_id}"),
+                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"ttt_decline:{new_id}"),
+            ]
+        ])
+        try:
+            await bot.send_message(
+                opp_uid,
+                f"\U0001f3ae <b>Реванш!</b>\n\n"
+                f"Противник хочет сыграть снова!",
+                reply_markup=accept_kb,
+            )
+        except Exception:
+            pass
+        await callback.message.answer("✅ Запрос на реванш отправлен.")
+        return
+
+    elif action == "ttt_pgn":
+        page = int(parts[1])
+        await callback.answer()
+        text, markup = ttt_game_list(page)
+        if markup:
+            await callback.message.edit_text(text, reply_markup=markup)
+        else:
+            await callback.message.edit_text(text)
+        return
+
+    elif action == "ttt_my_stats":
+        if not is_admin(callback.from_user.id):
+            await callback.answer(f"❌ Только для {ADMIN_NAME}.", show_alert=True)
+            return
+        await callback.answer()
+        stats = db.get_player_stats(ADMIN_ANON_ID)
+        await callback.message.answer(
+            f"\U0001f4ca <b>Моя статистика (Крестики-нолики)</b>\n\n"
+            f"\U0001f3c6 Побед: <b>{stats['wins']}</b>\n"
+            f"\U0001f4a5 Поражений: <b>{stats['losses']}</b>\n"
+            f"\U0001f91d Ничьих: <b>{stats['draws']}</b>\n"
+            f"📊 Всего игр: <b>{stats['total']}</b>\n"
+            f"👥 Соперников: <b>{stats['opponents']}</b>"
+        )
+        return
+
+    elif action == "none":
+        if not is_admin(callback.from_user.id):
+            await callback.answer()
+            return
+        await callback.answer()
+
+    # ── Admin-only callbacks ──
+
+    if not is_admin(callback.from_user.id):
         return
 
     anon_id = int(parts[1])
@@ -609,9 +1018,9 @@ async def handle_callback(callback: CallbackQuery):
         await callback.answer()
         await delete_waiting(target_user_id)
         await callback.message.answer(
-            f"✏️ <b>Введите текст</b> для пользователя #<b>{anon_id}</b>\n\n"
-            "Отправь сообщение — оно будет доставлено.\n"
-            "/cancel — отменить",
+            f"\u270f\ufe0f <b>Введите текст</b> для пользователя #<b>{anon_id}</b>\n\n"
+            "Отправь сообщение \u2014 оно будет доставлено.\n"
+            "/cancel \u2014 отменить",
             reply_markup=admin_cmds_keyboard(),
         )
 
@@ -622,37 +1031,47 @@ async def handle_callback(callback: CallbackQuery):
         if u is None:
             await callback.message.answer("❌ Пользователь не найден.")
             return
-        name = esc(u["first_name"] or "—")
-        username = f"@{esc(u['username'])}" if u["username"] else "—"
-        lang = u["language_code"] or "—"
-        created = u["created_at"][:16] if u["created_at"] else "—"
-        last = u["last_active"][:16] if u["last_active"] else "—"
-        status = "🚫 Заблокирован" if u["is_banned"] else "✅ Активен"
+        name = esc(u["first_name"] or "\u2014")
+        username = f"@{esc(u['username'])}" if u["username"] else "\u2014"
+        lang = u["language_code"] or "\u2014"
+        created = u["created_at"][:16] if u["created_at"] else "\u2014"
+        last = u["last_active"][:16] if u["last_active"] else "\u2014"
+        is_del = u.get("is_deleted") or 0
+        if is_del:
+            status = "\U0001f5d1 Удалён"
+        elif u["is_banned"]:
+            status = "\U0001f6ab Заблокирован"
+        else:
+            status = "✅ Активен"
         text = (
             f"👤 <b>Пользователь #{anon_id}</b>\n\n"
             f"👤 Имя: {name}\n"
-            f"🔗 Юзернейм: {username}\n"
-            f"🌐 Язык: {lang}\n"
-            f"📅 Создан: {created}\n"
-            f"🕐 Активен: {last}\n"
-            f"📌 Статус: {status}"
+            f"\U0001f517 Юзернейм: {username}\n"
+            f"\U0001f310 Язык: {lang}\n"
+            f"\U0001f4c5 Создан: {created}\n"
+            f"\U0001f550 Активен: {last}\n"
+            f"\U0001f4cc Статус: {status}"
         )
         kb = InlineKeyboardBuilder()
-        kb.button(text="✍️ Написать", callback_data=f"reply:{anon_id}")
-        kb.button(text="✏️ Изменить имя", callback_data=f"rename:{anon_id}")
-        if u["is_banned"]:
-            kb.button(text="✅ Разблокировать", callback_data=f"unban:{anon_id}")
+        if is_del:
+            kb.button(text="✅ Восстановить", callback_data=f"restore:{anon_id}")
+            kb.button(text="\U0001f5d1 Удалить навсегда", callback_data=f"hard_del_ask:{anon_id}")
         else:
-            kb.button(text="🚫 Заблокировать", callback_data=f"ban:{anon_id}")
-        kb.button(text="🗑 Удалить", callback_data=f"del_ask:{anon_id}")
+            kb.button(text="\u270d\ufe0f Написать", callback_data=f"reply:{anon_id}")
+            kb.button(text="\u270f\ufe0f Изменить имя", callback_data=f"rename:{anon_id}")
+            if u["is_banned"]:
+                kb.button(text="✅ Разблокировать", callback_data=f"unban:{anon_id}")
+            else:
+                kb.button(text="\U0001f6ab Заблокировать", callback_data=f"ban:{anon_id}")
+            kb.button(text="\U0001f5d1 Удалить", callback_data=f"del_ask:{anon_id}")
+            kb.button(text="\U0001f3ae Играть", callback_data=f"ttt_challenge:{anon_id}")
         kb.adjust(1)
         await callback.message.answer(text, reply_markup=kb.as_markup())
 
     elif action == "ban":
-        await callback.answer("🚫 Пользователь заблокирован.")
+        await callback.answer("\U0001f6ab Пользователь заблокирован.")
         db.ban_user(target_user_id)
         await delete_waiting(target_user_id)
-        # Update the keyboard
         new_kb = user_actions_keyboard(anon_id, is_banned=True).as_markup()
         await callback.message.edit_reply_markup(reply_markup=new_kb)
 
@@ -670,16 +1089,25 @@ async def handle_callback(callback: CallbackQuery):
         await callback.answer()
         await delete_waiting(target_user_id)
         await callback.message.answer(
-            f"✏️ <b>Введите текст</b> для пользователя #<b>{anon_id}</b>\n\n"
-            "Отправь сообщение — оно будет доставлено.\n"
-            "/cancel — отменить",
+            f"\u270f\ufe0f <b>Введите текст</b> для пользователя #<b>{anon_id}</b>\n\n"
+            "Отправь сообщение \u2014 оно будет доставлено.\n"
+            "/cancel \u2014 отменить",
             reply_markup=admin_cmds_keyboard(),
         )
 
     elif action == "pgn":
-        page = anon_id  # anon_id_str was parsed as int, we use it as page
+        page = anon_id
         await callback.answer()
         text, markup = paginated_users_list(page)
+        if markup:
+            await callback.message.edit_text(text, reply_markup=markup)
+        else:
+            await callback.message.edit_text(text)
+
+    elif action == "pgn_del":
+        page = anon_id
+        await callback.answer()
+        text, markup = paginated_users_list(page, action="del_ask", nav_prefix="pgn_del")
         if markup:
             await callback.message.edit_text(text, reply_markup=markup)
         else:
@@ -689,9 +1117,9 @@ async def handle_callback(callback: CallbackQuery):
         rename_anon_id = anon_id
         await callback.answer()
         await callback.message.answer(
-            f"✏️ <b>Введите новое имя</b> для пользователя #<b>{anon_id}</b>\n\n"
+            f"\u270f\ufe0f <b>Введите новое имя</b> для пользователя #<b>{anon_id}</b>\n\n"
             "Просто напиши новое имя.\n"
-            "/cancel — отменить"
+            "/cancel \u2014 отменить"
         )
 
     elif action == "del_ask":
@@ -701,18 +1129,23 @@ async def handle_callback(callback: CallbackQuery):
         kb.button(text="❌ Нет", callback_data=f"del_no:{anon_id}")
         kb.adjust(2)
         await callback.message.answer(
-            f"🗑 <b>Точно удалить</b> пользователя #<b>{anon_id}</b>?\n"
-            "Все его сообщения и данные будут безвозвратно удалены.",
+            f"\U0001f5d1 <b>Точно удалить</b> пользователя #<b>{anon_id}</b>?\n"
+            "Пользователь будет перемещён в \u00abУдалённые\u00bb.\n"
+            "Его можно будет восстановить.",
             reply_markup=kb.as_markup(),
         )
 
     elif action == "del_yes":
-        await callback.answer("🗑 Пользователь удалён.")
+        await callback.answer()
         db.delete_user(anon_id)
         try:
             await callback.message.delete()
         except Exception:
             pass
+        await callback.message.answer(
+            f"\U0001f5d1 Пользователь #<b>{anon_id}</b> перемещён в \u00ab\U0001f5d1 Удаленные\u00bb.\n"
+            "Можешь нажать кнопку <b>\U0001f5d1 Удаленные</b> внизу, чтобы посмотреть."
+        )
 
     elif action == "del_no":
         await callback.answer()
@@ -721,19 +1154,52 @@ async def handle_callback(callback: CallbackQuery):
         except Exception:
             pass
 
+    elif action == "restore":
+        await callback.answer("✅ Пользователь восстановлен.")
+        db.restore_user(anon_id)
+        await delete_waiting(target_user_id)
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        await callback.message.answer(
+            f"✅ Пользователь #<b>{anon_id}</b> восстановлен и снова в списке."
+        )
 
-
-    elif action == "none":
+    elif action == "hard_del_ask":
         await callback.answer()
+        kb = InlineKeyboardBuilder()
+        kb.button(text="✅ Да, удалить навсегда", callback_data=f"hard_del_yes:{anon_id}")
+        kb.button(text="❌ Нет", callback_data=f"del_no:{anon_id}")
+        kb.adjust(2)
+        await callback.message.answer(
+            f"⚠️ <b>Точно удалить навсегда</b> пользователя #<b>{anon_id}</b>?\n"
+            "Все сообщения и данные будут безвозвратно удалены.",
+            reply_markup=kb.as_markup(),
+        )
+
+    elif action == "hard_del_yes":
+        await callback.answer("\U0001f5d1 Пользователь удалён навсегда.")
+        db.hard_delete_user(anon_id)
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        await callback.message.answer(
+            f"\U0001f5d1 Пользователь #<b>{anon_id}</b> и все его сообщения удалены навсегда."
+        )
 
 
-BTN_WRITE = "✍️ Написать"
-BTN_HISTORY = "📜 История"
-BTN_STATS = "📊 Статистика"
-BTN_LIST = "👥 Список"
-BTN_BANNED = "🚫 Блокировки"
-BTN_ADD_ID = "➕ Добавить ID"
-BTN_BCAST = "📢 Рассылка"
+BTN_WRITE = "\u270d\ufe0f Написать"
+BTN_HISTORY = "\U0001f4dc История"
+BTN_STATS = "\U0001f4ca Статистика"
+BTN_LIST = "\U0001f464 Список"
+BTN_BANNED = "\U0001f6ab Блокировки"
+BTN_DELETED = "\U0001f5d1 Удаленные"
+BTN_DEL = "\U0001f5d1 Удалить"
+BTN_ADD_ID = "\u2795 Добавить ID"
+BTN_TTT = "\U0001f3ae Крестики-нолики"
+BTN_BCAST = "\U0001f4e2 Рассылка"
 BTN_HELP = "❓ Помощь"
 BTN_CANCEL = "❌ Отмена"
 
@@ -744,7 +1210,8 @@ def admin_cmds_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text=BTN_WRITE)],
             [KeyboardButton(text=BTN_HISTORY), KeyboardButton(text=BTN_STATS)],
             [KeyboardButton(text=BTN_LIST), KeyboardButton(text=BTN_BANNED)],
-            [KeyboardButton(text=BTN_ADD_ID)],
+            [KeyboardButton(text=BTN_DELETED), KeyboardButton(text=BTN_DEL)],
+            [KeyboardButton(text=BTN_TTT), KeyboardButton(text=BTN_ADD_ID)],
             [KeyboardButton(text=BTN_BCAST)],
             [KeyboardButton(text=BTN_HELP), KeyboardButton(text=BTN_CANCEL)],
         ],
@@ -753,7 +1220,8 @@ def admin_cmds_keyboard() -> ReplyKeyboardMarkup:
     )
 
 
-BTN_CMDS = {BTN_WRITE, BTN_HISTORY, BTN_STATS, BTN_LIST, BTN_BANNED, BTN_ADD_ID, BTN_BCAST, BTN_HELP, BTN_CANCEL}
+BTN_CMDS = {BTN_WRITE, BTN_HISTORY, BTN_STATS, BTN_LIST, BTN_BANNED,
+            BTN_DELETED, BTN_DEL, BTN_TTT, BTN_ADD_ID, BTN_BCAST, BTN_HELP, BTN_CANCEL}
 
 
 # ────────────────────────────── Messages ──────────────────────────────
@@ -769,7 +1237,6 @@ async def handle_user_message(message: Message):
         if message.text is None and admin_pending_reply is None and write_flow_step is None and not add_user_step and rename_anon_id is None:
             return
 
-        # ── Handle write-to-user flow ──
         if write_flow_step == "await_id":
             if message.text is None:
                 await message.answer("❌ Пожалуйста, введи ID числом.")
@@ -782,13 +1249,9 @@ async def handle_user_message(message: Message):
                     return
                 write_flow_anon_id = anon_id
                 write_flow_step = "await_text"
-                await message.answer(
-                    f"✅ ID #<b>{anon_id}</b> принят. Теперь введи текст сообщения:"
-                )
+                await message.answer(f"✅ ID #<b>{anon_id}</b> принят. Теперь введи текст сообщения:")
             except ValueError:
-                await message.answer(
-                    "❌ ID должен быть числом. Попробуй ещё раз или /cancel"
-                )
+                await message.answer("❌ ID должен быть числом. Попробуй ещё раз или /cancel")
             return
 
         if write_flow_step == "await_text":
@@ -801,26 +1264,22 @@ async def handle_user_message(message: Message):
             await delete_waiting(target_user_id)
             try:
                 admin_text = get_message_text(message)
-                prefix = f"✉️ <b>Сообщение от {ADMIN_NAME}:</b>"
+                prefix = f"\u2709\ufe0f <b>Сообщение от {ADMIN_NAME}:</b>"
                 caption = f"{prefix}\n\n{esc(admin_text)}" if admin_text else prefix
                 await forward_media(target_user_id, message, caption)
                 db.save_message(target_user_id, write_flow_anon_id, admin_text, direction="admin_to_user")
                 kb = admin_cmds_keyboard()
-                await message.answer(
-                    f"✅ Сообщение отправлено пользователю #<b>{write_flow_anon_id}</b>!",
-                    reply_markup=kb,
-                )
+                await message.answer(f"✅ Сообщение отправлено пользователю #<b>{write_flow_anon_id}</b>!", reply_markup=kb)
             except Exception as e:
                 await message.answer(f"❌ Ошибка: {e}")
             write_flow_step = None
             write_flow_anon_id = None
             return
 
-        # ── Handle add-user-by-ID flow ──
         if message.text == BTN_ADD_ID:
             add_user_step = True
             await message.answer(
-                "🔢 <b>Введи Telegram ID пользователя</b> (число).\n\n"
+                "\U0001f522 <b>Введи Telegram ID пользователя</b> (число).\n\n"
                 "Чтобы узнать ID: перешли любое сообщение от пользователя "
                 "в @userinfobot.\n\n"
                 "Или отправь /cancel чтобы отменить."
@@ -842,8 +1301,8 @@ async def handle_user_message(message: Message):
                 await message.answer(
                     f"ℹ️ Пользователь с ID <code>{uid}</code> уже есть в БД.\n"
                     f"🆔 Анонимный ID: <b>#{existing['id']}</b>\n"
-                    f"👤 {esc(existing['first_name'] or '—')}\n"
-                    f"🔗 @{esc(existing['username']) if existing['username'] else '—'}",
+                    f"👤 {esc(existing['first_name'] or '\u2014')}\n"
+                    f"\U0001f517 @{esc(existing['username']) if existing['username'] else '\u2014'}",
                     reply_markup=admin_cmds_keyboard(),
                 )
                 return
@@ -853,8 +1312,8 @@ async def handle_user_message(message: Message):
                 await message.answer(
                     f"✅ Пользователь <code>{uid}</code> добавлен!\n"
                     f"🆔 Анонимный ID: <b>#{anon_id}</b>\n"
-                    f"👤 {esc(chat.first_name or '—')}\n"
-                    f"🔗 @{esc(chat.username) if chat.username else '—'}",
+                    f"👤 {esc(chat.first_name or '\u2014')}\n"
+                    f"\U0001f517 @{esc(chat.username) if chat.username else '\u2014'}",
                     reply_markup=admin_cmds_keyboard(),
                 )
             except Exception as e:
@@ -869,7 +1328,6 @@ async def handle_user_message(message: Message):
                 )
             return
 
-        # ── Handle rename flow ──
         if rename_anon_id is not None:
             text = message.text or ""
             if not text.strip():
@@ -885,13 +1343,9 @@ async def handle_user_message(message: Message):
             )
             return
 
-        # ── Handle keyboard buttons ──
         if message.text == BTN_WRITE:
             text, markup = paginated_users_list(1)
-            await message.answer(
-                "👇 <b>Выбери пользователя</b> — нажми ✍️ рядом с именем:",
-                reply_markup=markup,
-            )
+            await message.answer("\U0001f447 <b>Выбери пользователя</b> \u2014 нажми \u270d\ufe0f рядом с именем:", reply_markup=markup)
             return
         if message.text == BTN_HISTORY:
             return await cmd_history(message)
@@ -901,9 +1355,19 @@ async def handle_user_message(message: Message):
             return await cmd_list(message)
         if message.text == BTN_BANNED:
             return await cmd_banned(message)
+        if message.text == BTN_DELETED:
+            return await cmd_deleted(message)
+        if message.text == BTN_DEL:
+            text, markup = paginated_users_list(1, action="del_ask", nav_prefix="pgn_del")
+            await message.answer("\U0001f447 <b>Выбери пользователя для удаления:</b>", reply_markup=markup)
+            return
+        if message.text == BTN_TTT:
+            text, markup = ttt_game_list(1)
+            await message.answer(text, reply_markup=markup)
+            return
         if message.text == BTN_BCAST:
             await message.answer(
-                "📢 <b>Введите текст для рассылки</b>\n\n"
+                "\U0001f4e2 <b>Введите текст для рассылки</b>\n\n"
                 "После команды напиши сообщение:\n"
                 "<code>/broadcast Ваш текст</code>"
             )
@@ -912,7 +1376,7 @@ async def handle_user_message(message: Message):
             return await cmd_help(message)
         if message.text == BTN_CANCEL:
             return await cmd_cancel(message)
-        # If admin is in reply mode, send as reply to user
+
         if admin_pending_reply is not None:
             anon_id = admin_pending_reply
             target_user_id = db.get_user_id_by_anon(anon_id)
@@ -923,7 +1387,7 @@ async def handle_user_message(message: Message):
             await delete_waiting(target_user_id)
             try:
                 admin_text = get_message_text(message)
-                prefix = f"✉️ <b>Ответ от {ADMIN_NAME}:</b>"
+                prefix = f"\u2709\ufe0f <b>Ответ от {ADMIN_NAME}:</b>"
                 caption = f"{prefix}\n\n{esc(admin_text)}" if admin_text else prefix
                 await forward_media(target_user_id, message, caption)
                 db.save_message(target_user_id, anon_id, admin_text, direction="admin_to_user")
@@ -936,16 +1400,17 @@ async def handle_user_message(message: Message):
                     await message.answer(f"❌ Не удалось отправить: {e}")
             admin_pending_reply = None
             return
+
         await message.answer(
-            "💡 Используй кнопки внизу или нажми\n"
-            "<b>✍️ Ответить</b> под сообщением пользователя.\n"
-            "<code>/help</code> — список команд",
+            "\U0001f4a1 Используй кнопки внизу или нажми\n"
+            "<b>\u270d\ufe0f Ответить</b> под сообщением пользователя.\n"
+            "<code>/help</code> \u2014 список команд",
             reply_markup=admin_cmds_keyboard(),
         )
         return
 
     if db.is_banned(user_id):
-        await message.answer("🚫 Вы заблокированы и не можете отправлять сообщения.")
+        await message.answer("\U0001f6ab Вы заблокированы и не можете отправлять сообщения.")
         return
 
     user = message.from_user
@@ -958,19 +1423,19 @@ async def handle_user_message(message: Message):
 
     last_admin_msg = db.get_last_admin_message(user_id)
     if last_admin_msg:
-        reply_context = f"📎 <b>Ответ на ваше сообщение:</b>\n└ {esc(last_admin_msg[:100])}"
+        reply_context = f"\U0001f4ce <b>Ответ на ваше сообщение:</b>\n\u2514 {esc(last_admin_msg[:100])}"
     else:
         reply_context = None
 
     info_lines = [
-        f"📩 <b>Новое сообщение</b>",
-        f"🆔 Анонимный ID: <b>#{anon_id}</b>",
-        f"👤 {esc(user.first_name or '—')}",
+        f"\U0001f4e9 <b>Новое сообщение</b>",
+        f"\U0001f194 Анонимный ID: <b>#{anon_id}</b>",
+        f"👤 {esc(user.first_name or '\u2014')}",
     ]
     if user.username:
-        info_lines.append(f"🔗 @{esc(user.username)}")
+        info_lines.append(f"\U0001f517 @{esc(user.username)}")
     if user.language_code:
-        info_lines.append(f"🌐 {user.language_code}")
+        info_lines.append(f"\U0001f310 {user.language_code}")
 
     if reply_context:
         info_lines.append("")
@@ -989,22 +1454,39 @@ async def handle_user_message(message: Message):
     if user_text:
         info_lines.append(esc(user_text))
 
-    kb = user_actions_keyboard(anon_id, is_banned=bool(is_banned)).as_markup()
+    show_ttt = False
+    if user_text:
+        user_text_lower = user_text.lower()
+        show_ttt = any(kw in user_text_lower for kw in GAME_KEYWORDS)
+
     admin_text = "\n".join(info_lines)
+    kb = user_actions_keyboard(anon_id, is_banned=bool(is_banned), show_ttt=show_ttt).as_markup()
     await forward_media(ADMIN_ID, message, admin_text, reply_markup=kb)
 
     msg_text = get_message_text(message)
     db.save_message(user_id, anon_id, msg_text)
 
-    wait_msg = await message.answer(
-        "🍪 <b>Подождите!</b>\n\n"
+    show_ttt = False
+    if msg_text:
+        msg_lower = msg_text.lower()
+        show_ttt = any(kw in msg_lower for kw in GAME_KEYWORDS)
+
+    wait_text = (
+        "\U0001f36a <b>Подождите!</b>\n\n"
         "Ваше сообщение доставлено. "
-        "Печенька в скором времени ответит вам. ✉️"
+        "Печенька в скором времени ответит вам. \u2709\ufe0f"
     )
+    if show_ttt:
+        wait_text += (
+            "\n\n\U0001f3ae <b>Хочешь сыграть в крестики-нолики?</b>\n"
+            f"{ADMIN_NAME} уже получил твой вызов!"
+        )
+
+    wait_msg = await message.answer(wait_text)
     waiting_messages[user_id] = wait_msg.message_id
 
 
-# ────────── Healthcheck HTTP server (for platform keep-alive) ─────
+# ────────── Healthcheck HTTP server ────────────────────────────
 
 async def handle_healthcheck(reader, writer):
     request = await reader.read(2048)
@@ -1025,21 +1507,19 @@ async def handle_healthcheck(reader, writer):
 
 
 async def run_healthcheck():
-    server = await asyncio.start_server(
-        handle_healthcheck, host="0.0.0.0", port=8080
-    )
-    logging.info("🩺 Healthcheck server on :8080")
+    server = await asyncio.start_server(handle_healthcheck, host="0.0.0.0", port=8080)
+    logging.info("\U0001fa7a Healthcheck server on :8080")
     async with server:
         await server.serve_forever()
 
 
-# ────────────────────────────── Entry ──────────────────────────────
+# ────────────────────────────── Entry ──────────────────────────
 
 async def main():
     healthcheck_task = asyncio.create_task(run_healthcheck())
     while True:
         try:
-            logging.info("🚀 Бот запущен!")
+            logging.info("\U0001f680 Бот запущен!")
             await dp.start_polling(bot, skip_updates=True)
         except Exception as e:
             logging.error(f"Критическая ошибка: {e}", exc_info=True)
