@@ -989,7 +989,11 @@ async def _handle_callback(callback: CallbackQuery):
         if success:
             await callback.answer()
         else:
-            await callback.answer(err, show_alert=True)
+            await callback.answer()
+            try:
+                await callback.message.answer(f"❌ {err}")
+            except Exception:
+                pass
         return
 
     elif action == "ttt_surrender":
