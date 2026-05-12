@@ -208,10 +208,14 @@ def ttt_build_keyboard(game, anon_id: int, can_move: bool) -> InlineKeyboardMark
             else:
                 row.append(InlineKeyboardButton(text=cell, callback_data="none"))
         rows.append(row)
-    rows.append([
-        InlineKeyboardButton(text="\U0001f504 Реванш", callback_data=f"ttt_rematch:{game['id']}"),
-        InlineKeyboardButton(text="\u26d4 Сдаюсь", callback_data=f"ttt_surrender:{game['id']}"),
-    ])
+    if game["status"] == "active":
+        rows.append([InlineKeyboardButton(text="\u26d4 Сдаюсь", callback_data=f"ttt_surrender:{game['id']}")])
+    elif game["status"] == "finished":
+        rematch_sent = row_get(game, "rematch_sent", 0)
+        if rematch_sent:
+            rows.append([InlineKeyboardButton(text="✅ Реванш запрошен", callback_data="none")])
+        else:
+            rows.append([InlineKeyboardButton(text="\U0001f504 Реванш", callback_data=f"ttt_rematch:{game['id']}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -999,6 +1003,10 @@ async def _handle_callback(callback: CallbackQuery):
             await callback.answer("❌ Игра не найдена.", show_alert=True)
             return
         await callback.answer()
+        # Mark rematch as sent on old game (prevent double rematch)
+        db.update_game(game_id, rematch_sent=1)
+        old_game = db.get_game(game_id)
+        await ttt_send_board(old_game)
         p1_aid = old_game["player1_anon_id"]
         p2_aid = old_game["player2_anon_id"]
         p1_uid = old_game["player1_user_id"]
