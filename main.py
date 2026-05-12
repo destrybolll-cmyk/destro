@@ -497,6 +497,10 @@ async def cmd_cancel(message: Message):
     write_flow_anon_id = None
     add_user_step = False
     rename_anon_id = None
+    # Cancel any pending TTT challenge
+    pending = db.get_player_game(ADMIN_ANON_ID, statuses=("pending",))
+    if pending:
+        db.update_game(pending["id"], status="cancelled")
     await cmd_help(message)
 
 
@@ -846,8 +850,11 @@ async def _handle_callback(callback: CallbackQuery):
             return
         admin_game = db.get_player_game(ADMIN_ANON_ID)
         if admin_game:
-            await callback.answer("❌ Вы уже в игре. Завершите текущую игру.", show_alert=True)
-            return
+            if admin_game["status"] == "active":
+                await callback.answer("❌ Вы уже в игре. Завершите текущую игру.", show_alert=True)
+                return
+            # Cancel pending challenge automatically
+            db.update_game(admin_game["id"], status="cancelled")
         user_game = db.get_player_game(anon_id)
         if user_game:
             await callback.answer("❌ Пользователь уже в игре с другим человеком.", show_alert=True)
