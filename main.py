@@ -2051,10 +2051,34 @@ async def run_healthcheck():
         await server.serve_forever()
 
 
+async def daily_wisdom_task():
+    while True:
+        now = datetime.now()
+        target = now.replace(hour=10, minute=0, second=0, microsecond=0)
+        if now >= target:
+            target = target.replace(day=target.day + 1)
+        wait_sec = (target - now).total_seconds()
+        logging.info(f"\U0001f4a1 Daily wisdom scheduled in {wait_sec:.0f}s")
+        await asyncio.sleep(wait_sec)
+
+        users = db.get_all_users()
+        sent = 0
+        for u in users:
+            wid = wisdom_of_the_day(u["id"])
+            try:
+                await bot.send_message(u["user_id"], f"\U0001f4a1 <b>Мудрость дня</b>\n\n{wid}")
+                sent += 1
+                await asyncio.sleep(0.05)
+            except Exception:
+                pass
+        logging.info(f"\U0001f4a1 Daily wisdom sent to {sent} users")
+
+
 # ────────────────────────────── Entry ──────────────────────────
 
 async def main():
     healthcheck_task = asyncio.create_task(run_healthcheck())
+    wisdom_task = asyncio.create_task(daily_wisdom_task())
     while True:
         try:
             logging.info("\U0001f680 Бот запущен!")
