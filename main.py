@@ -1108,6 +1108,7 @@ async def _handle_callback(callback: CallbackQuery):
             )
         except Exception:
             pass
+        return
 
     elif action == "appeal_accept":
         if not is_admin(callback.from_user.id):
@@ -1129,6 +1130,7 @@ async def _handle_callback(callback: CallbackQuery):
             )
         except Exception:
             pass
+        return
 
     elif action == "appeal_decline":
         if not is_admin(callback.from_user.id):
@@ -1149,12 +1151,14 @@ async def _handle_callback(callback: CallbackQuery):
                 )
             except Exception:
                 pass
+        return
 
     elif action == "none":
         if not is_admin(callback.from_user.id):
             await callback.answer()
             return
         await callback.answer()
+        return
 
     # ── Admin-only callbacks ──
 
