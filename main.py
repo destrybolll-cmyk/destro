@@ -28,9 +28,6 @@ TTT_CELL_O = "\u2b55"
 
 GAME_KEYWORDS = {"игра", "ttt", "крестики", "нолики", "хочу играть", "поиграем", "давай поиграем", "сыграем"}
 
-# TTT game message tracking: game_id -> admin's last board message_id
-ttt_admin_msg_ids: dict[int, int] = {}
-
 
 async def delete_waiting(target_user_id: int):
     msg_id = waiting_messages.pop(target_user_id, None)
@@ -323,16 +320,16 @@ async def ttt_send_board(game):
     admin_kb = ttt_build_keyboard(game, admin_aid, admin_can_move)
     user_kb = ttt_build_keyboard(game, user_aid, user_can_move)
     gid = game["id"]
-    last_id = ttt_admin_msg_ids.get(gid)
+    last_id = row_get(game, "admin_msg_id", 0)
     if last_id:
         try:
             await bot.edit_message_text(text, admin_uid, last_id, reply_markup=admin_kb)
         except Exception:
             msg = await bot.send_message(admin_uid, text, reply_markup=admin_kb)
-            ttt_admin_msg_ids[gid] = msg.message_id
+            db.update_game(gid, admin_msg_id=msg.message_id)
     else:
         msg = await bot.send_message(admin_uid, text, reply_markup=admin_kb)
-        ttt_admin_msg_ids[gid] = msg.message_id
+        db.update_game(gid, admin_msg_id=msg.message_id)
     try:
         await bot.send_message(user_uid, text, reply_markup=user_kb)
     except Exception:
@@ -343,7 +340,10 @@ async def ttt_start_game(game_id: int):
     game = db.get_game(game_id)
     if not game or game["status"] != "pending":
         return
-    x_player = random.choice([game["player1_anon_id"], game["player2_anon_id"]])
+    if game["x_player"] is None:
+        x_player = random.choice([game["player1_anon_id"], game["player2_anon_id"]])
+    else:
+        x_player = game["x_player"]
     db.update_game(game_id, status="active", x_player=x_player, current_turn=x_player, board="_________")
     game = db.get_game(game_id)
     await ttt_send_board(game)
@@ -891,7 +891,7 @@ async def _handle_callback(callback: CallbackQuery):
             await callback.answer("❌ Пользователь не найден.", show_alert=True)
             return
         target_user_id = user["user_id"]
-        game_id = db.create_game(ADMIN_ANON_ID, anon_id, ADMIN_ID, target_user_id, ADMIN_ANON_ID)
+        game_id = db.create_game(ADMIN_ANON_ID, anon_id, ADMIN_ID, target_user_id, None)
         await callback.answer()
         await bot.send_message(
             ADMIN_ID,
@@ -1005,7 +1005,10 @@ async def _handle_callback(callback: CallbackQuery):
         p2_aid = old_game["player2_anon_id"]
         p1_uid = old_game["player1_user_id"]
         p2_uid = old_game["player2_user_id"]
-        new_id = db.create_game(p1_aid, p2_aid, p1_uid, p2_uid, p1_aid)
+        # Alternate X/O: opposite of who was X last game
+        old_x = old_game["x_player"]
+        next_x = p2_aid if old_x == p1_aid else p1_aid
+        new_id = db.create_game(p1_aid, p2_aid, p1_uid, p2_uid, next_x)
         admin_game = db.get_player_game(ADMIN_ANON_ID, statuses=("pending", "active"))
         if admin_game and admin_game["id"] != new_id:
             db.update_game(new_id, status="cancelled")

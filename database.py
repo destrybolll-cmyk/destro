@@ -65,6 +65,10 @@ class Database:
             except sqlite3.OperationalError:
                 pass
             try:
+                conn.execute("ALTER TABLE games ADD COLUMN admin_msg_id INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
+            try:
                 conn.execute("ALTER TABLE messages ADD COLUMN direction TEXT DEFAULT 'user_to_admin'")
             except sqlite3.OperationalError:
                 pass
