@@ -1748,6 +1748,7 @@ BTN_TTT = "\U0001f3ae Крестики-нолики"
 BTN_DICE = "\U0001f3b2 Везение"
 BTN_BCAST = "\U0001f4e2 Рассылка"
 BTN_CASINO = "\U0001f3b0 Казино секретов"
+BTN_MY_SECRETS = "\U0001f4dc Мои секреты"
 BTN_HELP = "❓ Помощь"
 BTN_CANCEL = "❌ Отмена"
 
@@ -1761,7 +1762,8 @@ def admin_cmds_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text=BTN_DELETED), KeyboardButton(text=BTN_BLOCKED)],
             [KeyboardButton(text=BTN_TTT), KeyboardButton(text=BTN_DICE)],
             [KeyboardButton(text=BTN_DEL)],
-            [KeyboardButton(text=BTN_CASINO), KeyboardButton(text=BTN_ADD_ID)],
+            [KeyboardButton(text=BTN_CASINO), KeyboardButton(text=BTN_MY_SECRETS)],
+            [KeyboardButton(text=BTN_ADD_ID)],
             [KeyboardButton(text=BTN_BCAST)],
             [KeyboardButton(text=BTN_HELP), KeyboardButton(text=BTN_CANCEL)],
         ],
@@ -1771,7 +1773,7 @@ def admin_cmds_keyboard() -> ReplyKeyboardMarkup:
 
 
 BTN_CMDS = {BTN_WRITE, BTN_HISTORY, BTN_STATS, BTN_LIST, BTN_BANNED,
-            BTN_DELETED, BTN_DEL, BTN_BLOCKED, BTN_TTT, BTN_DICE, BTN_CASINO, BTN_ADD_ID, BTN_BCAST, BTN_HELP, BTN_CANCEL}
+            BTN_DELETED, BTN_DEL, BTN_BLOCKED, BTN_TTT, BTN_DICE, BTN_CASINO, BTN_MY_SECRETS, BTN_ADD_ID, BTN_BCAST, BTN_HELP, BTN_CANCEL}
 
 
 # ────────────────────────────── Messages ──────────────────────────────
@@ -1966,7 +1968,23 @@ async def handle_user_message(message: Message):
                 "Пользователи с 🍪 могут играть в рулетку!"
             )
             return
-        if message.text == BTN_HELP:
+        if message.text == BTN_MY_SECRETS:
+            secrets = db.get_all_secrets()
+            if not secrets:
+                await message.answer("\U0001f4dc <b>Секретов пока нет.</b>")
+                return
+            lines = ["\U0001f4dc <b>Все секреты обо мне</b>\n"]
+            for s in secrets:
+                sid = s["id"]
+                status = "✅" if s["status"] == "accepted" else "\u23f3" if s["status"] == "pending" else "\u274c"
+                name = esc(s["first_name"] or f"#{s['anon_id']}")
+                text = esc(s["text"][:100])
+                lines.append(f"{status} #{sid} — {name}: {text}")
+            text = "\n".join(lines)
+            if len(text) > 4000:
+                text = text[:4000] + "\n\n..."
+            await message.answer(text)
+            return
             return await cmd_help(message)
         if message.text == BTN_CANCEL:
             return await cmd_cancel(message)

@@ -418,6 +418,14 @@ class Database:
                 SELECT * FROM secrets WHERE status = 'accepted' ORDER BY id DESC
             """).fetchall()
 
+    def get_all_secrets(self):
+        with self._get_conn() as conn:
+            return conn.execute("""
+                SELECT s.*, u.first_name, u.username FROM secrets s
+                LEFT JOIN users u ON s.anon_id = u.id
+                ORDER BY s.id DESC
+            """).fetchall()
+
     # ──────────── Dice game methods ────────────
 
     def create_dice_game(self, p1_anon: int, p2_anon: int) -> int:
