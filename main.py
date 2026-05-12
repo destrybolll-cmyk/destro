@@ -666,6 +666,30 @@ async def cmd_banned(message: Message):
     await message.answer(text, reply_markup=markup)
 
 
+def blocked_users_list():
+    users = db.get_blocked_users()
+    if not users:
+        return "\U0001f6ab <b>Нет пользователей, которые заблокировали бота.</b>", None
+    kb = InlineKeyboardBuilder()
+    for u in users:
+        name = esc(u["first_name"] or "\u2014")
+        uname = f" @{esc(u['username'])}" if u["username"] else ""
+        kb.button(text=f"#{u['id']} \u2014 {name}{uname}", callback_data=f"unblock:{u['id']}")
+    kb.adjust(1)
+    return (
+        f"\U0001f6ab <b>Пользователи, которые заблокировали бота</b> ({len(users)}):\n\n"
+        "Нажми на пользователя, чтобы снять пометку.",
+        kb.as_markup(),
+    )
+
+
+async def cmd_blocked(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    text, markup = blocked_users_list()
+    await message.answer(text, reply_markup=markup)
+
+
 def deleted_users_list():
     users = db.get_deleted_users()
     if not users:
@@ -764,8 +788,11 @@ async def cmd_broadcast(message: Message):
             )
             sent += 1
             await asyncio.sleep(0.03)
-        except Exception:
+        except Exception as be:
             failed += 1
+            err_lower = str(be).lower()
+            if "chat not found" in err_lower or "bot was blocked" in err_lower:
+                db.mark_blocked(u["user_id"])
     await status.edit_text(
         f"\U0001f4e2 <b>Рассылка завершена</b>\n\n"
         f"✅ Доставлено: <b>{sent}</b>\n"
@@ -884,17 +911,8 @@ async def _handle_callback(callback: CallbackQuery):
                 f"Нажми <b>❌ Отклонить</b> чтобы отказаться.",
                 reply_markup=accept_kb,
             )
-        except Exception as e:
-            err_text = str(e)
-            if "chat not found" in err_text.lower() or "bot was blocked" in err_text.lower() or "forbidden" in err_text.lower():
-                await bot.send_message(
-                    ADMIN_ID,
-                    f"❌ Пользователь #{anon_id} не может получить вызов.\n"
-                    "Возможно, он не писал боту или заблокировал его.\n"
-                    "Пользователь должен написать боту любое сообщение, чтобы активировать чат."
-                )
-            else:
-                await bot.send_message(ADMIN_ID, f"❌ Не удалось отправить вызов пользователю #{anon_id}: {esc(err_text[:200])}")
+        except Exception:
+            await bot.send_message(ADMIN_ID, f"❌ Не удалось отправить вызов пользователю #{anon_id}.")
         return
 
     elif action == "ttt_accept":
@@ -1231,12 +1249,21 @@ async def _handle_callback(callback: CallbackQuery):
             f"\U0001f5d1 Пользователь #<b>{anon_id}</b> и все его сообщения удалены навсегда."
         )
 
+    elif action == "unblock":
+        await callback.answer("✅ Пометка снята.")
+        db.unmark_blocked(anon_id)
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+
 
 BTN_WRITE = "\u270d\ufe0f Написать"
 BTN_HISTORY = "\U0001f4dc История"
 BTN_STATS = "\U0001f4ca Статистика"
 BTN_LIST = "\U0001f464 Список"
 BTN_BANNED = "\U0001f6ab Блокировки"
+BTN_BLOCKED = "\U0001f6ab Заблокировали бота"
 BTN_DELETED = "\U0001f5d1 Удаленные"
 BTN_DEL = "\U0001f5d1 Удалить"
 BTN_ADD_ID = "\u2795 Добавить ID"
@@ -1252,8 +1279,9 @@ def admin_cmds_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text=BTN_WRITE)],
             [KeyboardButton(text=BTN_HISTORY), KeyboardButton(text=BTN_STATS)],
             [KeyboardButton(text=BTN_LIST), KeyboardButton(text=BTN_BANNED)],
-            [KeyboardButton(text=BTN_DELETED), KeyboardButton(text=BTN_DEL)],
-            [KeyboardButton(text=BTN_TTT), KeyboardButton(text=BTN_ADD_ID)],
+            [KeyboardButton(text=BTN_DELETED), KeyboardButton(text=BTN_BLOCKED)],
+            [KeyboardButton(text=BTN_TTT), KeyboardButton(text=BTN_DEL)],
+            [KeyboardButton(text=BTN_ADD_ID)],
             [KeyboardButton(text=BTN_BCAST)],
             [KeyboardButton(text=BTN_HELP), KeyboardButton(text=BTN_CANCEL)],
         ],
@@ -1263,7 +1291,7 @@ def admin_cmds_keyboard() -> ReplyKeyboardMarkup:
 
 
 BTN_CMDS = {BTN_WRITE, BTN_HISTORY, BTN_STATS, BTN_LIST, BTN_BANNED,
-            BTN_DELETED, BTN_DEL, BTN_TTT, BTN_ADD_ID, BTN_BCAST, BTN_HELP, BTN_CANCEL}
+            BTN_DELETED, BTN_DEL, BTN_BLOCKED, BTN_TTT, BTN_ADD_ID, BTN_BCAST, BTN_HELP, BTN_CANCEL}
 
 
 # ────────────────────────────── Messages ──────────────────────────────
@@ -1397,6 +1425,8 @@ async def handle_user_message(message: Message):
             return await cmd_list(message)
         if message.text == BTN_BANNED:
             return await cmd_banned(message)
+        if message.text == BTN_BLOCKED:
+            return await cmd_blocked(message)
         if message.text == BTN_DELETED:
             return await cmd_deleted(message)
         if message.text == BTN_DEL:
@@ -1436,8 +1466,9 @@ async def handle_user_message(message: Message):
                 kb = admin_cmds_keyboard()
                 await message.answer(f"✅ Ответ отправлен пользователю #<b>{anon_id}</b>!", reply_markup=kb)
             except Exception as e:
-                if "chat not found" in str(e).lower():
+                if "chat not found" in str(e).lower() or "bot was blocked" in str(e).lower():
                     await message.answer("❌ Пользователь больше недоступен (удалил чат или заблокировал бота).")
+                    db.mark_blocked(target_user_id)
                 else:
                     await message.answer(f"❌ Не удалось отправить: {e}")
             admin_pending_reply = None

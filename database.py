@@ -61,6 +61,10 @@ class Database:
             except sqlite3.OperationalError:
                 pass
             try:
+                conn.execute("ALTER TABLE users ADD COLUMN is_blocked INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
+            try:
                 conn.execute("ALTER TABLE messages ADD COLUMN direction TEXT DEFAULT 'user_to_admin'")
             except sqlite3.OperationalError:
                 pass
@@ -154,6 +158,20 @@ class Database:
             return conn.execute(
                 "SELECT * FROM users WHERE is_banned = 1 ORDER BY last_active DESC"
             ).fetchall()
+
+    def get_blocked_users(self):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM users WHERE is_blocked = 1 ORDER BY last_active DESC"
+            ).fetchall()
+
+    def mark_blocked(self, user_id: int):
+        with self._get_conn() as conn:
+            conn.execute("UPDATE users SET is_blocked = 1 WHERE user_id = ?", (user_id,))
+
+    def unmark_blocked(self, anon_id: int):
+        with self._get_conn() as conn:
+            conn.execute("UPDATE users SET is_blocked = 0 WHERE id = ?", (anon_id,))
 
     def save_message(self, user_id: int, anon_id: int, text: str, direction: str = "user_to_admin"):
         with self._get_conn() as conn:
