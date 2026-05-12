@@ -3,6 +3,7 @@ import logging
 import html
 import os
 import random
+import time
 from datetime import datetime
 
 from aiogram import Bot, Dispatcher
@@ -27,6 +28,10 @@ TTT_CELL_X = "\u274c"
 TTT_CELL_O = "\u2b55"
 
 GAME_KEYWORDS = {"игра", "ttt", "крестики", "нолики", "хочу играть", "поиграем", "давай поиграем", "сыграем"}
+
+# Anti-spam tracking
+user_last_msg: dict[int, float] = {}
+user_spam_warnings: dict[int, int] = {}
 
 
 async def delete_waiting(target_user_id: int):
@@ -1610,6 +1615,22 @@ async def handle_user_message(message: Message):
             reply_markup=appeal_kb,
         )
         return
+
+    # Anti-spam: max 1 message per 3 seconds
+    now = time.time()
+    last = user_last_msg.get(user_id, 0)
+    if now - last < 3 and message.from_user.id != ADMIN_ID:
+        warnings = user_spam_warnings.get(user_id, 0) + 1
+        user_spam_warnings[user_id] = warnings
+        if warnings >= 2:
+            db.ban_user(user_id)
+            await message.answer("\U0001f6ab Вы заблокированы за спам.")
+            ban_info = db.get_anon_id_by_user_id(user_id)
+            await bot.send_message(ADMIN_ID, f"\U0001f6ab Пользователь <code>{user_id}</code> {'(#' + str(ban_info) + ')' if ban_info else ''} автоматически заблокирован за спам.")
+            return
+        await message.answer("⚠️ <b>Не спамьте!</b> Подождите 3 секунды между сообщениями.")
+        return
+    user_last_msg[user_id] = now
 
     user = message.from_user
     anon_id, is_banned = db.add_user(
