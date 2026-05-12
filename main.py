@@ -544,7 +544,11 @@ async def cmd_reply(message: Message):
         db.save_message(target_user_id, anon_id, reply_text, direction="admin_to_user")
         await message.answer(f"✅ Ответ отправлен пользователю #{anon_id}!")
     except Exception as e:
-        await message.answer(f"❌ Не удалось отправить: {e}")
+        err = str(e).lower()
+        if "forbidden" in err:
+            await message.answer("❌ Пользователь ограничил получение этого типа сообщений.")
+        else:
+            await message.answer(f"❌ Не удалось отправить: {e}")
 
 
 @dp.message(Command("ban"))
@@ -1442,7 +1446,11 @@ async def handle_user_message(message: Message):
                 kb = admin_cmds_keyboard()
                 await message.answer(f"✅ Сообщение отправлено пользователю #<b>{write_flow_anon_id}</b>!", reply_markup=kb)
             except Exception as e:
-                await message.answer(f"❌ Ошибка: {e}")
+                err = str(e).lower()
+                if "forbidden" in err:
+                    await message.answer("❌ Пользователь ограничил получение этого типа сообщений.")
+                else:
+                    await message.answer(f"❌ Ошибка: {e}")
             write_flow_step = None
             write_flow_anon_id = None
             return
@@ -1567,9 +1575,12 @@ async def handle_user_message(message: Message):
                 kb = admin_cmds_keyboard()
                 await message.answer(f"✅ Ответ отправлен пользователю #<b>{anon_id}</b>!", reply_markup=kb)
             except Exception as e:
-                if "chat not found" in str(e).lower() or "bot was blocked" in str(e).lower():
+                err = str(e).lower()
+                if "chat not found" in err or "bot was blocked" in err:
                     await message.answer("❌ Пользователь больше недоступен (удалил чат или заблокировал бота).")
                     db.mark_blocked(target_user_id)
+                elif "forbidden" in err:
+                    await message.answer(f"❌ Пользователь ограничил получение этого типа сообщений.")
                 else:
                     await message.answer(f"❌ Не удалось отправить: {e}")
             admin_pending_reply = None
