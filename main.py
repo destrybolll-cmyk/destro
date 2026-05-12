@@ -877,11 +877,8 @@ async def _handle_callback(callback: CallbackQuery):
             return
         admin_game = db.get_player_game(ADMIN_ANON_ID)
         if admin_game:
-            if admin_game["status"] == "active":
-                await callback.answer("❌ Вы уже в игре. Завершите текущую игру.", show_alert=True)
-                return
-            # Cancel pending challenge automatically
             db.update_game(admin_game["id"], status="cancelled")
+            await bot.send_message(ADMIN_ID, f"♻️ Предыдущая игра отменена.")
         user_game = db.get_player_game(anon_id)
         if user_game:
             await callback.answer("❌ Пользователь уже в игре с другим человеком.", show_alert=True)
