@@ -911,8 +911,14 @@ async def _handle_callback(callback: CallbackQuery):
                 f"Нажми <b>❌ Отклонить</b> чтобы отказаться.",
                 reply_markup=accept_kb,
             )
-        except Exception:
-            await bot.send_message(ADMIN_ID, f"❌ Не удалось отправить вызов пользователю #{anon_id}.")
+        except Exception as ce:
+            db.mark_blocked(target_user_id)
+            db.update_game(game_id, status="cancelled")
+            err_msg = str(ce).lower()
+            if "chat not found" in err_msg or "bot was blocked" in err_msg:
+                await bot.send_message(ADMIN_ID, f"❌ Пользователь #{anon_id} заблокировал бота. Вызов отменён.")
+            else:
+                await bot.send_message(ADMIN_ID, f"❌ Не удалось отправить вызов пользователю #{anon_id}: {esc(str(ce)[:100])}")
         return
 
     elif action == "ttt_accept":
