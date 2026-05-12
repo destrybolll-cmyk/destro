@@ -969,7 +969,9 @@ async def _handle_callback(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         if action in ("ttt_accept", "ttt_decline", "ttt_move", "ttt_surrender", "ttt_rematch",
                        "appeal", "appeal_accept", "appeal_decline",
-                       "dice_accept", "dice_decline", "dice_rematch", "dice_my_stats", "dice_pgn"):
+                       "dice_accept", "dice_decline", "dice_rematch", "dice_my_stats", "dice_pgn",
+                       "casino", "tell_secret", "roulette", "roulette_bet", "balance", "top_secrets",
+                       "none"):
             pass
         else:
             await callback.answer(f"❌ Только для {ADMIN_NAME}.", show_alert=True)
