@@ -389,6 +389,67 @@ async def ttt_process_move(game_id: int, anon_id: int, position: int):
     return True, None
 
 
+# ═══════════════════════ Dice Game (Везение) ═══════════════════════
+
+def dice_game_list(page: int = 1):
+    users = [u for u in db.get_all_users() if u["id"] != ADMIN_ANON_ID]
+    if not users:
+        return "\U0001f4ad Нет пользователей для игры.", None
+    total_pages = max(1, (len(users) + USERS_PER_PAGE - 1) // USERS_PER_PAGE)
+    page = max(1, min(page, total_pages))
+    start = (page - 1) * USERS_PER_PAGE
+    end = start + USERS_PER_PAGE
+    page_users = users[start:end]
+    lines = [f"\U0001f3b2 <b>Выбери соперника</b> (стр. {page}/{total_pages}):\n"]
+    for u in page_users:
+        name = esc(u["first_name"] or "\u2014")
+        uname = f" @{esc(u['username'])}" if u["username"] else ""
+        lines.append(f"\U0001f539 #<b>{u['id']}</b> \u2014 {name}{uname}")
+    text = "\n".join(lines)
+    rows = []
+    for u in page_users:
+        label = (u["first_name"] or f"#{u['id']}")[:14]
+        rows.append([InlineKeyboardButton(text=f"\U0001f3b2 {label}", callback_data=f"dice_challenge:{u['id']}")])
+    if total_pages > 1:
+        nav = []
+        if page > 1:
+            nav.append(InlineKeyboardButton(text="\u2b05\ufe0f", callback_data=f"dice_pgn:{page - 1}"))
+        nav.append(InlineKeyboardButton(text=f"\U0001f4c4 {page}/{total_pages}", callback_data="none"))
+        if page < total_pages:
+            nav.append(InlineKeyboardButton(text="\u27a1\ufe0f", callback_data=f"dice_pgn:{page + 1}"))
+        rows.append(nav)
+    rows.append([InlineKeyboardButton(text="\U0001f4ca Моя статистика", callback_data="dice_my_stats")])
+    return text, InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def dice_play_game(game_id: int, anon_id: int, user_uid: int):
+    p1_score = random.randint(1, 6) + random.randint(1, 6)
+    p2_score = random.randint(1, 6) + random.randint(1, 6)
+    db.finish_dice_game(game_id, p1_score, p2_score)
+    game_info = db.get_dice_stats(anon_id)
+    p1_name = ADMIN_NAME if ADMIN_ANON_ID == anon_id else f"#{anon_id}"
+    p2_name = ADMIN_NAME if ADMIN_ANON_ID != anon_id else f"#{anon_id}"
+    lines = [
+        f"\U0001f3b2 <b>Везение!</b>\n",
+        f"<b>{p1_name}</b> \U0001f3b2: {p1_score // 2} + {p1_score - p1_score // 2} = <b>{p1_score}</b>",
+        f"<b>{p2_name}</b> \U0001f3b2: {p2_score // 2} + {p2_score - p2_score // 2} = <b>{p2_score}</b>",
+        "",
+    ]
+    if p1_score > p2_score:
+        lines.append(f"\U0001f3c6 <b>Победил: {p1_name}</b>")
+    elif p2_score > p1_score:
+        lines.append(f"\U0001f3c6 <b>Победил: {p2_name}</b>")
+    else:
+        lines.append("\U0001f91d <b>Ничья!</b>")
+    text = "\n".join(lines)
+    admin_uid = ADMIN_ID
+    try:
+        await bot.send_message(admin_uid, text)
+        await bot.send_message(user_uid, text)
+    except Exception:
+        pass
+
+
 # ────────────────────────────── Users ──────────────────────────────
 
 @dp.message(Command("start"))
@@ -601,6 +662,7 @@ async def cmd_stats(message: Message):
         return
     stats = db.get_stats()
     ttt_stats = db.get_player_stats(ADMIN_ANON_ID)
+    dice_stats = db.get_dice_stats(ADMIN_ANON_ID)
     await message.answer(
         f"\U0001f4ca <b>Статистика бота</b>\n\n"
         f"👥 Всего: <b>{stats['total']}</b>\n"
@@ -611,7 +673,12 @@ async def cmd_stats(message: Message):
         f"🏆 Побед: <b>{ttt_stats['wins']}</b>\n"
         f"\U0001f4a5 Поражений: <b>{ttt_stats['losses']}</b>\n"
         f"\U0001f91d Ничьих: <b>{ttt_stats['draws']}</b>\n"
-        f"👥 Соперников: <b>{ttt_stats['opponents']}</b>"
+        f"👥 Соперников: <b>{ttt_stats['opponents']}</b>\n\n"
+        f"\U0001f3b2 <b>Везение</b>\n"
+        f"🏆 Побед: <b>{dice_stats['wins']}</b>\n"
+        f"\U0001f4a5 Поражений: <b>{dice_stats['losses']}</b>\n"
+        f"\U0001f91d Ничьих: <b>{dice_stats['draws']}</b>\n"
+        f"👥 Соперников: <b>{dice_stats['opponents']}</b>"
     )
 
 
@@ -878,7 +945,8 @@ async def _handle_callback(callback: CallbackQuery):
 
     if not is_admin(callback.from_user.id):
         if action in ("ttt_accept", "ttt_decline", "ttt_move", "ttt_surrender", "ttt_rematch",
-                       "appeal", "appeal_accept", "appeal_decline"):
+                       "appeal", "appeal_accept", "appeal_decline",
+                       "dice_accept", "dice_decline", "dice_my_stats", "dice_pgn"):
             pass
         else:
             await callback.answer(f"❌ Только для {ADMIN_NAME}.", show_alert=True)
@@ -1080,6 +1148,98 @@ async def _handle_callback(callback: CallbackQuery):
         stats = db.get_player_stats(ADMIN_ANON_ID)
         await callback.message.answer(
             f"\U0001f4ca <b>Моя статистика (Крестики-нолики)</b>\n\n"
+            f"\U0001f3c6 Побед: <b>{stats['wins']}</b>\n"
+            f"\U0001f4a5 Поражений: <b>{stats['losses']}</b>\n"
+            f"\U0001f91d Ничьих: <b>{stats['draws']}</b>\n"
+            f"📊 Всего игр: <b>{stats['total']}</b>\n"
+            f"👥 Соперников: <b>{stats['opponents']}</b>"
+        )
+        return
+
+    elif action == "dice_challenge":
+        if not is_admin(callback.from_user.id):
+            await callback.answer(f"❌ Только для {ADMIN_NAME}.", show_alert=True)
+            return
+        anon_id = int(parts[1])
+        if anon_id == ADMIN_ANON_ID:
+            await callback.answer("❌ Нельзя играть с самим собой.", show_alert=True)
+            return
+        user = db.get_user_by_anon(anon_id)
+        if not user or row_get(user, "is_deleted"):
+            await callback.answer("❌ Пользователь не найден.", show_alert=True)
+            return
+        target_user_id = user["user_id"]
+        game_id = db.create_dice_game(ADMIN_ANON_ID, anon_id)
+        await callback.answer()
+        await bot.send_message(ADMIN_ID, "Ожидайте ответа от пользователя...")
+        accept_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Кинуть кубик!", callback_data=f"dice_accept:{game_id}"),
+                InlineKeyboardButton(text="❌ Нет", callback_data=f"dice_decline:{game_id}"),
+            ]
+        ])
+        try:
+            await bot.send_message(
+                target_user_id,
+                f"\U0001f3b2 <b>{ADMIN_NAME} бросил вам вызов в Везение!</b>\n\n"
+                f"Нажми <b>✅ Кинуть кубик!</b> чтобы сыграть.",
+                reply_markup=accept_kb,
+            )
+        except Exception as ce:
+            err_msg = str(ce).lower()
+            if "chat not found" in err_msg or "bot was blocked" in err_msg:
+                await bot.send_message(ADMIN_ID, f"❌ Пользователь #{anon_id} заблокировал бота.")
+            else:
+                await bot.send_message(ADMIN_ID, f"❌ Не удалось отправить вызов: {esc(str(ce)[:100])}")
+        return
+
+    elif action == "dice_accept":
+        game_id = int(parts[1])
+        await callback.answer("\U0001f3b2 Кидаем кубики!")
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        if is_admin(callback.from_user.id):
+            anon_id = ADMIN_ANON_ID
+        else:
+            anon_id = db.get_anon_id_by_user_id(callback.from_user.id)
+        if anon_id is None:
+            return
+        user_id = callback.from_user.id
+        opp_uid = ADMIN_ID if user_id == ADMIN_ID else db.get_user_id_by_anon(anon_id)
+        if opp_uid is None:
+            return
+        await dice_play_game(game_id, anon_id, opp_uid)
+
+    elif action == "dice_decline":
+        game_id = int(parts[1])
+        await callback.answer("❌ Вызов отклонён.")
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        if not is_admin(callback.from_user.id):
+            await bot.send_message(ADMIN_ID, "❌ Пользователь отклонил вызов в Везение.")
+
+    elif action == "dice_pgn":
+        page = int(parts[1])
+        await callback.answer()
+        text, markup = dice_game_list(page)
+        if markup:
+            await callback.message.edit_text(text, reply_markup=markup)
+        else:
+            await callback.message.edit_text(text)
+        return
+
+    elif action == "dice_my_stats":
+        if not is_admin(callback.from_user.id):
+            await callback.answer(f"❌ Только для {ADMIN_NAME}.", show_alert=True)
+            return
+        await callback.answer()
+        stats = db.get_dice_stats(ADMIN_ANON_ID)
+        await callback.message.answer(
+            f"\U0001f4ca <b>Моя статистика (Везение)</b>\n\n"
             f"\U0001f3c6 Побед: <b>{stats['wins']}</b>\n"
             f"\U0001f4a5 Поражений: <b>{stats['losses']}</b>\n"
             f"\U0001f91d Ничьих: <b>{stats['draws']}</b>\n"
@@ -1387,6 +1547,7 @@ BTN_DELETED = "\U0001f5d1 Удаленные"
 BTN_DEL = "\U0001f5d1 Удалить"
 BTN_ADD_ID = "\u2795 Добавить ID"
 BTN_TTT = "\U0001f3ae Крестики-нолики"
+BTN_DICE = "\U0001f3b2 Везение"
 BTN_BCAST = "\U0001f4e2 Рассылка"
 BTN_HELP = "❓ Помощь"
 BTN_CANCEL = "❌ Отмена"
@@ -1399,7 +1560,8 @@ def admin_cmds_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text=BTN_HISTORY), KeyboardButton(text=BTN_STATS)],
             [KeyboardButton(text=BTN_LIST), KeyboardButton(text=BTN_BANNED)],
             [KeyboardButton(text=BTN_DELETED), KeyboardButton(text=BTN_BLOCKED)],
-            [KeyboardButton(text=BTN_TTT), KeyboardButton(text=BTN_DEL)],
+            [KeyboardButton(text=BTN_TTT), KeyboardButton(text=BTN_DICE)],
+            [KeyboardButton(text=BTN_DEL)],
             [KeyboardButton(text=BTN_ADD_ID)],
             [KeyboardButton(text=BTN_BCAST)],
             [KeyboardButton(text=BTN_HELP), KeyboardButton(text=BTN_CANCEL)],
@@ -1410,7 +1572,7 @@ def admin_cmds_keyboard() -> ReplyKeyboardMarkup:
 
 
 BTN_CMDS = {BTN_WRITE, BTN_HISTORY, BTN_STATS, BTN_LIST, BTN_BANNED,
-            BTN_DELETED, BTN_DEL, BTN_BLOCKED, BTN_TTT, BTN_ADD_ID, BTN_BCAST, BTN_HELP, BTN_CANCEL}
+            BTN_DELETED, BTN_DEL, BTN_BLOCKED, BTN_TTT, BTN_DICE, BTN_ADD_ID, BTN_BCAST, BTN_HELP, BTN_CANCEL}
 
 
 # ────────────────────────────── Messages ──────────────────────────────
@@ -1558,6 +1720,10 @@ async def handle_user_message(message: Message):
             return
         if message.text == BTN_TTT:
             text, markup = ttt_game_list(1)
+            await message.answer(text, reply_markup=markup)
+            return
+        if message.text == BTN_DICE:
+            text, markup = dice_game_list(1)
             await message.answer(text, reply_markup=markup)
             return
         if message.text == BTN_BCAST:

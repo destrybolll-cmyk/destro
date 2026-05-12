@@ -84,6 +84,17 @@ class Database:
                 conn.execute("ALTER TABLE games ADD COLUMN rematch_sent INTEGER DEFAULT 0")
             except sqlite3.OperationalError:
                 pass
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS dice_games (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    player1_anon_id INTEGER NOT NULL,
+                    player2_anon_id INTEGER NOT NULL,
+                    p1_score        INTEGER DEFAULT 0,
+                    p2_score        INTEGER DEFAULT 0,
+                    winner          TEXT DEFAULT '',
+                    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
             try:
                 conn.execute("ALTER TABLE messages ADD COLUMN direction TEXT DEFAULT 'user_to_admin'")
             except sqlite3.OperationalError:
@@ -345,3 +356,46 @@ class Database:
                   AND status = 'finished'
                 ORDER BY id DESC LIMIT ?
             """, (anon_id, anon_id, limit)).fetchall()
+
+    # ──────────── Dice game methods ────────────
+
+    def create_dice_game(self, p1_anon: int, p2_anon: int) -> int:
+        with self._get_conn() as conn:
+            cursor = conn.execute("""
+                INSERT INTO dice_games (player1_anon_id, player2_anon_id)
+                VALUES (?, ?)
+            """, (p1_anon, p2_anon))
+            return cursor.lastrowid
+
+    def finish_dice_game(self, game_id: int, p1_score: int, p2_score: int):
+        with self._get_conn() as conn:
+            winner = ""
+            if p1_score > p2_score:
+                winner = "p1"
+            elif p2_score > p1_score:
+                winner = "p2"
+            else:
+                winner = "draw"
+            conn.execute("""
+                UPDATE dice_games SET p1_score = ?, p2_score = ?, winner = ? WHERE id = ?
+            """, (p1_score, p2_score, winner, game_id))
+
+    def get_dice_stats(self, anon_id: int) -> dict:
+        with self._get_conn() as conn:
+            rows = conn.execute("""
+                SELECT * FROM dice_games
+                WHERE (player1_anon_id = ? OR player2_anon_id = ?)
+            """, (anon_id, anon_id)).fetchall()
+        wins = losses = draws = 0
+        opponents = set()
+        for r in rows:
+            opp = r["player2_anon_id"] if r["player1_anon_id"] == anon_id else r["player1_anon_id"]
+            opponents.add(opp)
+            w = r["winner"]
+            if w == "draw":
+                draws += 1
+            elif (r["player1_anon_id"] == anon_id and w == "p1") or (r["player2_anon_id"] == anon_id and w == "p2"):
+                wins += 1
+            else:
+                losses += 1
+        return {"wins": wins, "losses": losses, "draws": draws, "total": wins + losses + draws, "opponents": len(opponents)}
