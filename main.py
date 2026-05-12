@@ -1320,6 +1320,7 @@ async def _handle_callback(callback: CallbackQuery):
             )
         except Exception:
             pass
+        return
 
     elif action == "secret_reject":
         if not is_admin(callback.from_user.id):
@@ -1333,6 +1334,7 @@ async def _handle_callback(callback: CallbackQuery):
             "Пользователь увидит этот комментарий.\n"
             "/cancel — отменить"
         )
+        return
 
     elif action == "secret_top":
         if not is_admin(callback.from_user.id):
@@ -1342,6 +1344,7 @@ async def _handle_callback(callback: CallbackQuery):
         db.accept_secret(secret_id, row_get(db.get_secret(secret_id), "cookies_awarded", 0), set_top=True)
         await callback.answer("✅ Секрет добавлен в топ!")
         await callback.message.edit_text(f"✅ Секрет #{secret_id} добавлен в Топ секретов.")
+        return
 
     elif action == "casino":
         if is_admin(callback.from_user.id):
@@ -1363,6 +1366,7 @@ async def _handle_callback(callback: CallbackQuery):
             "Играйте в рулетку и выигрывайте!",
             reply_markup=kb,
         )
+        return
 
     elif action == "roulette":
         if is_admin(callback.from_user.id):
@@ -1385,6 +1389,7 @@ async def _handle_callback(callback: CallbackQuery):
             f"Выберите цвет:",
             reply_markup=kb,
         )
+        return
 
     elif action == "roulette_bet":
         if is_admin(callback.from_user.id):
@@ -1396,7 +1401,7 @@ async def _handle_callback(callback: CallbackQuery):
         if cookies < 1:
             await callback.answer("❌ Недостаточно 🍪.", show_alert=True)
             return
-        number = secrets.randbelow(36) + 1  # 1-36
+        number = secrets.randbelow(36) + 1
         is_even = number % 2 == 0
         result_color = "red" if is_even else "black"
         win = result_color == color
@@ -1411,8 +1416,9 @@ async def _handle_callback(callback: CallbackQuery):
         await callback.answer()
         msg = f"\U0001f3b0 <b>Рулетка</b>\n\n{result_text}\n\nВаш баланс: <b>{new_cookies} 🍪</b>"
         if new_cookies <= 0:
-            msg += "\n\n\U0001f4a5 Вы проиграли все Cookies!\nРасскажите еще один секрет и получите больше 🍪!"
+            msg += "\n\n\U0001f4a5 Вы проиграли все Cookies!\nРасскажите еще один секрет и получите больше \U0001f36a!"
         await callback.message.edit_text(msg)
+        return
 
     elif action == "balance":
         if is_admin(callback.from_user.id):
@@ -1422,6 +1428,7 @@ async def _handle_callback(callback: CallbackQuery):
         cookies = db.get_cookies(anon_id)
         await callback.answer()
         await callback.message.answer(f"\U0001f4b0 <b>Ваш баланс:</b> {cookies} 🍪")
+        return
 
     elif action == "tell_secret":
         if is_admin(callback.from_user.id):
@@ -1435,6 +1442,7 @@ async def _handle_callback(callback: CallbackQuery):
             "Напишите секрет, который вы знаете.\n"
             "Если он правдив, вы получите 1-2 🍪!"
         )
+        return
 
     elif action == "top_secrets":
         await callback.answer()
@@ -1447,6 +1455,7 @@ async def _handle_callback(callback: CallbackQuery):
                 lines.append(f"{i}. {esc(s['text'][:200])}")
             text = "\n".join(lines)
         await callback.message.answer(text)
+        return
 
     elif action == "appeal":
         if is_admin(callback.from_user.id):
