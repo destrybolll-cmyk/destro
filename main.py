@@ -1002,8 +1002,10 @@ async def _handle_callback(callback: CallbackQuery):
         if not old_game:
             await callback.answer("❌ Игра не найдена.", show_alert=True)
             return
+        if row_get(old_game, "rematch_sent", 0):
+            await callback.answer("❌ Реванш можно кинуть только один раз за игру.", show_alert=True)
+            return
         await callback.answer()
-        # Mark rematch as sent on old game (prevent double rematch)
         db.update_game(game_id, rematch_sent=1)
         old_game = db.get_game(game_id)
         await ttt_send_board(old_game)
