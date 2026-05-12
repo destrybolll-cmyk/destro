@@ -859,7 +859,8 @@ async def _handle_callback(callback: CallbackQuery):
     action = parts[0]
 
     if not is_admin(callback.from_user.id):
-        if action in ("ttt_accept", "ttt_decline", "ttt_move", "ttt_surrender", "ttt_rematch"):
+        if action in ("ttt_accept", "ttt_decline", "ttt_move", "ttt_surrender", "ttt_rematch",
+                       "appeal", "appeal_accept", "appeal_decline"):
             pass
         else:
             await callback.answer(f"❌ Только для {ADMIN_NAME}.", show_alert=True)
@@ -1058,6 +1059,55 @@ async def _handle_callback(callback: CallbackQuery):
             f"👥 Соперников: <b>{stats['opponents']}</b>"
         )
         return
+
+    elif action == "appeal":
+        if is_admin(callback.from_user.id):
+            await callback.answer()
+            return
+        anon_id = int(parts[1])
+        await callback.answer()
+        u = db.get_user_by_anon(anon_id)
+        if not u:
+            return
+        name = esc(u["first_name"] or "—")
+        username = f" @{esc(u['username'])}" if u["username"] else ""
+        appeal_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Разблокировать", callback_data=f"appeal_accept:{anon_id}"),
+                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"appeal_decline:{anon_id}"),
+            ]
+        ])
+        await bot.send_message(
+            ADMIN_ID,
+            f"👤 <b>Апелляция на разблокировку</b>\n\n"
+            f"🆔 Анонимный ID: <b>#{anon_id}</b>\n"
+            f"👤 {name}{username}\n\n"
+            "Пользователь просит разблокировать его.",
+            reply_markup=appeal_kb,
+        )
+
+    elif action == "appeal_accept":
+        if not is_admin(callback.from_user.id):
+            await callback.answer()
+            return
+        anon_id = int(parts[1])
+        uid = db.get_user_id_by_anon(anon_id)
+        if uid:
+            db.unban_user(uid)
+        await callback.answer("✅ Пользователь разблокирован.")
+        await callback.message.edit_text(
+            f"✅ Пользователь #<b>{anon_id}</b> разблокирован."
+        )
+
+    elif action == "appeal_decline":
+        if not is_admin(callback.from_user.id):
+            await callback.answer()
+            return
+        anon_id = int(parts[1])
+        await callback.answer("❌ Апелляция отклонена.")
+        await callback.message.edit_text(
+            f"❌ Апелляция пользователя #<b>{anon_id}</b> отклонена."
+        )
 
     elif action == "none":
         if not is_admin(callback.from_user.id):
@@ -1489,7 +1539,16 @@ async def handle_user_message(message: Message):
         return
 
     if db.is_banned(user_id):
-        await message.answer("\U0001f6ab Вы заблокированы и не можете отправлять сообщения.")
+        ban_anon = db.get_anon_id_by_user_id(user_id)
+        appeal_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Подать апелляцию", callback_data=f"appeal:{ban_anon}"),
+             InlineKeyboardButton(text="❌ Нет", callback_data="none")]
+        ])
+        await message.answer(
+            "\U0001f6ab <b>Вы заблокированы и не можете писать.</b>\n\n"
+            "Хотите подать апелляцию?",
+            reply_markup=appeal_kb,
+        )
         return
 
     user = message.from_user
