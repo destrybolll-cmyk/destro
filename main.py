@@ -214,7 +214,9 @@ def ttt_board_text(board: str) -> str:
     lines = []
     for r in range(3):
         cells = [ttt_render_cell(board, r * 3 + c) for c in range(3)]
-        lines.append(" ".join(cells))
+        lines.append(f"  {cells[0]}  │  {cells[1]}  │  {cells[2]}")
+        if r < 2:
+            lines.append(" ─────┼─────┼─────")
     return "\n".join(lines)
 
 
@@ -833,8 +835,7 @@ async def handle_callback(callback: CallbackQuery):
         await callback.answer()
         await bot.send_message(
             ADMIN_ID,
-            f"✅ Ты кинул вызов пользователю #<b>{anon_id}</b>!\n"
-            "Ожидайте ответа..."
+            "Ожидайте ответа от пользователя..."
         )
         accept_kb = InlineKeyboardMarkup(inline_keyboard=[
             [
@@ -845,10 +846,9 @@ async def handle_callback(callback: CallbackQuery):
         try:
             await bot.send_message(
                 target_user_id,
-                f"\U0001f3ae <b>Вызов в крестики-нолики!</b>\n\n"
-                f"{ADMIN_NAME} бросает тебе вызов!\n\n"
-                "Нажми <b>✅ Принять</b> чтобы сыграть.\n"
-                "Нажми <b>❌ Отклонить</b> чтобы отказаться.",
+                f"\U0001f3ae <b>{ADMIN_NAME} бросил вам вызов в крестики нолики!</b>\n\n"
+                f"Нажми <b>✅ Принять</b> чтобы сыграть.\n"
+                f"Нажми <b>❌ Отклонить</b> чтобы отказаться.",
                 reply_markup=accept_kb,
             )
         except Exception:
