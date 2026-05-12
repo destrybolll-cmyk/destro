@@ -457,9 +457,12 @@ async def dice_play_game(game_id: int):
     else:
         lines.append("\U0001f91d <b>Ничья!</b>")
     text = "\n".join(lines)
+    rematch_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="\U0001f504 Реванш", callback_data=f"dice_rematch:{game_id}")]
+    ])
     try:
-        await bot.send_message(ADMIN_ID, text)
-        await bot.send_message(p2_uid, text)
+        await bot.send_message(ADMIN_ID, text, reply_markup=rematch_kb)
+        await bot.send_message(p2_uid, text, reply_markup=rematch_kb)
     except Exception:
         pass
 
@@ -960,7 +963,7 @@ async def _handle_callback(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         if action in ("ttt_accept", "ttt_decline", "ttt_move", "ttt_surrender", "ttt_rematch",
                        "appeal", "appeal_accept", "appeal_decline",
-                       "dice_accept", "dice_decline", "dice_my_stats", "dice_pgn"):
+                       "dice_accept", "dice_decline", "dice_rematch", "dice_my_stats", "dice_pgn"):
             pass
         else:
             await callback.answer(f"❌ Только для {ADMIN_NAME}.", show_alert=True)
@@ -1225,6 +1228,40 @@ async def _handle_callback(callback: CallbackQuery):
             pass
         if not is_admin(callback.from_user.id):
             await bot.send_message(ADMIN_ID, "❌ Пользователь отклонил вызов в Везение.")
+
+    elif action == "dice_rematch":
+        old_id = int(parts[1])
+        # Get the old game to know who the opponent is
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            old = conn.execute("SELECT * FROM dice_games WHERE id = ?", (old_id,)).fetchone()
+        if not old:
+            await callback.answer("❌ Игра не найдена.", show_alert=True)
+            return
+        p2_anon = old["player2_anon_id"]
+        p2_uid = db.get_user_id_by_anon(p2_anon)
+        if not p2_uid:
+            await callback.answer("❌ Пользователь не найден.", show_alert=True)
+            return
+        await callback.answer()
+        new_id = db.create_dice_game(ADMIN_ANON_ID, p2_anon)
+        await bot.send_message(ADMIN_ID, "Ожидайте ответа от пользователя...")
+        accept_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Кинуть кубик!", callback_data=f"dice_accept:{new_id}"),
+                InlineKeyboardButton(text="❌ Нет", callback_data=f"dice_decline:{new_id}"),
+            ]
+        ])
+        try:
+            await bot.send_message(
+                p2_uid,
+                f"\U0001f3b2 <b>Реванш в Везение!</b>\n\n"
+                f"Противник хочет сыграть снова!",
+                reply_markup=accept_kb,
+            )
+        except Exception:
+            await bot.send_message(ADMIN_ID, f"❌ Не удалось отправить реванш.")
+        return
 
     elif action == "dice_pgn":
         page = int(parts[1])
