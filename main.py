@@ -1090,6 +1090,14 @@ async def _handle_callback(callback: CallbackQuery):
             "Пользователь просит разблокировать его.",
             reply_markup=appeal_kb,
         )
+        try:
+            await bot.send_message(
+                u["user_id"],
+                "\U0001f36a <b>Cookie рассматривает вашу апелляцию.</b>\n\n"
+                "Ожидайте ответа."
+            )
+        except Exception:
+            pass
 
     elif action == "appeal_accept":
         if not is_admin(callback.from_user.id):
@@ -1103,6 +1111,14 @@ async def _handle_callback(callback: CallbackQuery):
         await callback.message.edit_text(
             f"✅ Пользователь #<b>{anon_id}</b> разблокирован."
         )
+        try:
+            await bot.send_message(
+                uid,
+                "\u2705 <b>Cookie одобрил вашу апелляцию!</b>\n\n"
+                "Вы разблокированы и снова можете писать."
+            )
+        except Exception:
+            pass
 
     elif action == "appeal_decline":
         if not is_admin(callback.from_user.id):
@@ -1113,6 +1129,16 @@ async def _handle_callback(callback: CallbackQuery):
         await callback.message.edit_text(
             f"❌ Апелляция пользователя #<b>{anon_id}</b> отклонена."
         )
+        uid = db.get_user_id_by_anon(anon_id)
+        if uid:
+            try:
+                await bot.send_message(
+                    uid,
+                    "\u274c <b>Cookie отклонил вашу апелляцию.</b>\n\n"
+                    "Вы остаётесь заблокированным."
+                )
+            except Exception:
+                pass
 
     elif action == "none":
         if not is_admin(callback.from_user.id):
