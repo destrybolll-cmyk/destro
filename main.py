@@ -155,6 +155,14 @@ def is_admin(user_id: int) -> bool:
     return user_id == ADMIN_ID
 
 
+def row_get(row, key: str, default=0):
+    try:
+        val = row[key]
+        return val if val is not None else default
+    except (KeyError, IndexError, AttributeError):
+        return default
+
+
 def get_opponent_anon(game, my_anon: int) -> int:
     return game["player2_anon_id"] if game["player1_anon_id"] == my_anon else game["player1_anon_id"]
 
@@ -696,7 +704,7 @@ async def cmd_user(message: Message):
     lang = u["language_code"] or "\u2014"
     created = u["created_at"][:16] if u["created_at"] else "\u2014"
     last = u["last_active"][:16] if u["last_active"] else "\u2014"
-    is_del = u.get("is_deleted") or 0
+    is_del = row_get(u, "is_deleted")
     if is_del:
         status = "\U0001f5d1 Удалён"
     elif u["is_banned"]:
@@ -845,7 +853,7 @@ async def _handle_callback(callback: CallbackQuery):
             await callback.answer("❌ Пользователь уже в игре с другим человеком.", show_alert=True)
             return
         user = db.get_user_by_anon(anon_id)
-        if not user or user.get("is_deleted"):
+        if not user or row_get(user, "is_deleted"):
             await callback.answer("❌ Пользователь не найден.", show_alert=True)
             return
         target_user_id = user["user_id"]
@@ -1054,7 +1062,7 @@ async def _handle_callback(callback: CallbackQuery):
         lang = u["language_code"] or "\u2014"
         created = u["created_at"][:16] if u["created_at"] else "\u2014"
         last = u["last_active"][:16] if u["last_active"] else "\u2014"
-        is_del = u.get("is_deleted") or 0
+        is_del = row_get(u, "is_deleted")
         if is_del:
             status = "\U0001f5d1 Удалён"
         elif u["is_banned"]:
