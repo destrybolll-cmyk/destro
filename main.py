@@ -231,7 +231,7 @@ def ttt_board_text(board: str) -> str:
         lines.append(f"  {cells[0]}  │  {cells[1]}  │  {cells[2]}")
         if r < 2:
             lines.append(" ─────┼─────┼─────")
-    return f"<code>{chr(10).join(lines)}</code>"
+    return "\n".join(lines)
 
 
 def ttt_check_winner(board: str) -> str:
@@ -258,11 +258,9 @@ def ttt_game_message(game) -> str:
     turn_name = ADMIN_NAME if turn_aid == ADMIN_ANON_ID else f"#{turn_aid}"
     turn_mark = "X" if turn_aid == game["x_player"] else "O"
 
-    x_emoji = TTT_CELL_X
-    o_emoji = TTT_CELL_O
     lines = [
-        f"<b>\U0001f3ae Крестики-нолики</b>",
-        f"{x_emoji} <b>X</b> — {x_name}    {o_emoji} <b>O</b> — {o_name}",
+        f"\U0001f3ae <b>Крестики-нолики</b>\n"
+        f"<b>X</b> {TTT_CELL_X} {x_name}    <b>O</b> {TTT_CELL_O} {o_name}",
         "",
         ttt_board_text(board),
     ]
@@ -341,7 +339,10 @@ async def ttt_send_board(game):
                 await bot.edit_message_text(text, uid, last_id, reply_markup=kb)
                 return
             except Exception:
-                pass
+                try:
+                    await bot.delete_message(uid, last_id)
+                except Exception:
+                    pass
         msg = await bot.send_message(uid, text, reply_markup=kb)
         db.update_game(gid, **{col: msg.message_id})
 
@@ -1619,16 +1620,16 @@ async def handle_user_message(message: Message):
     # Anti-spam: max 1 message per 3 seconds
     now = time.time()
     last = user_last_msg.get(user_id, 0)
-    if now - last < 3 and message.from_user.id != ADMIN_ID:
+    if now - last < 2 and message.from_user.id != ADMIN_ID:
         warnings = user_spam_warnings.get(user_id, 0) + 1
         user_spam_warnings[user_id] = warnings
-        if warnings >= 2:
+        if warnings >= 5:
             db.ban_user(user_id)
             await message.answer("\U0001f6ab Вы заблокированы за спам.")
             ban_info = db.get_anon_id_by_user_id(user_id)
             await bot.send_message(ADMIN_ID, f"\U0001f6ab Пользователь <code>{user_id}</code> {'(#' + str(ban_info) + ')' if ban_info else ''} автоматически заблокирован за спам.")
             return
-        await message.answer("⚠️ <b>Не спамьте!</b> Подождите 3 секунды между сообщениями.")
+        await message.answer("⚠️ <b>Не спамьте!</b> Подождите 2 секунды между сообщениями.")
         return
     user_last_msg[user_id] = now
 
