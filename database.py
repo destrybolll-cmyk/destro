@@ -389,6 +389,10 @@ class Database:
                 ORDER BY s.id DESC
             """).fetchall()
 
+    def get_idea(self, idea_id: int):
+        with self._get_conn() as conn:
+            return conn.execute("SELECT * FROM ideas WHERE id = ?", (idea_id,)).fetchone()
+
     def update_idea(self, idea_id: int, status: str, comment: str = ""):
         with self._get_conn() as conn:
             if comment:

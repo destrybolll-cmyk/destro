@@ -1525,15 +1525,12 @@ async def _handle_callback(callback: CallbackQuery):
         db.update_idea(idea_id, "accepted")
         await callback.answer("✅ Идея принята!")
         await callback.message.edit_text(f"✅ Идея #{idea_id} принята.")
-        # Notify user
-        ideas = db.get_ideas(status="accepted")
-        for s in ideas:
-            if s["id"] == idea_id:
-                try:
-                    await bot.send_message(s["user_id"], "\u2705 <b>Cookie принял вашу идею!</b>\n\nСпасибо за предложение!")
-                except Exception:
-                    pass
-                break
+        idea = db.get_idea(idea_id)
+        if idea:
+            try:
+                await bot.send_message(idea["user_id"], "\u2705 <b>Cookie принял вашу идею!</b>\n\nСпасибо за предложение!")
+            except Exception:
+                pass
         return
 
     elif action == "idea_reject":
@@ -1544,15 +1541,12 @@ async def _handle_callback(callback: CallbackQuery):
         db.update_idea(idea_id, "rejected")
         await callback.answer("❌ Идея отклонена.")
         await callback.message.edit_text(f"❌ Идея #{idea_id} отклонена.")
-        # Notify user
-        ideas = db.get_ideas(status="rejected")
-        for s in ideas:
-            if s["id"] == idea_id:
-                try:
-                    await bot.send_message(s["user_id"], "\u274c <b>Cookie отклонил вашу идею.</b>\n\nПопробуйте предложить другую!")
-                except Exception:
-                    pass
-                break
+        idea = db.get_idea(idea_id)
+        if idea:
+            try:
+                await bot.send_message(idea["user_id"], "\u274c <b>Cookie отклонил вашу идею.</b>\n\nПопробуйте предложить другую!")
+            except Exception:
+                pass
         return
 
     elif action == "idea_comment":
