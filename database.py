@@ -99,6 +99,17 @@ class Database:
                 conn.execute("ALTER TABLE messages ADD COLUMN direction TEXT DEFAULT 'user_to_admin'")
             except sqlite3.OperationalError:
                 pass
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS ideas (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id         INTEGER NOT NULL,
+                    anon_id         INTEGER NOT NULL,
+                    text            TEXT NOT NULL,
+                    status          TEXT DEFAULT 'pending',
+                    admin_comment   TEXT DEFAULT '',
+                    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
 
     def add_user(self, user_id: int, first_name: str = "", username: str = "", language_code: str = "") -> tuple:
         with self._get_conn() as conn:
@@ -357,9 +368,33 @@ class Database:
                 ORDER BY id DESC LIMIT ?
             """, (anon_id, anon_id, limit)).fetchall()
 
-    # ──────────── Dice game methods ────────────
+    # ──────────── Ideas methods ────────────
 
-    def create_dice_game(self, p1_anon: int, p2_anon: int) -> int:
+    def save_idea(self, anon_id: int, user_id: int, text: str) -> int:
+        with self._get_conn() as conn:
+            c = conn.execute("INSERT INTO ideas (user_id, anon_id, text) VALUES (?, ?, ?)", (user_id, anon_id, text))
+            return c.lastrowid
+
+    def get_ideas(self, status: str = None):
+        with self._get_conn() as conn:
+            if status:
+                return conn.execute("""
+                    SELECT s.*, u.first_name, u.username FROM ideas s
+                    LEFT JOIN users u ON s.anon_id = u.id
+                    WHERE s.status = ? ORDER BY s.id DESC
+                """, (status,)).fetchall()
+            return conn.execute("""
+                SELECT s.*, u.first_name, u.username FROM ideas s
+                LEFT JOIN users u ON s.anon_id = u.id
+                ORDER BY s.id DESC
+            """).fetchall()
+
+    def update_idea(self, idea_id: int, status: str, comment: str = ""):
+        with self._get_conn() as conn:
+            if comment:
+                conn.execute("UPDATE ideas SET status = ?, admin_comment = ? WHERE id = ?", (status, comment, idea_id))
+            else:
+                conn.execute("UPDATE ideas SET status = ? WHERE id = ?", (status, idea_id))
         with self._get_conn() as conn:
             cursor = conn.execute("""
                 INSERT INTO dice_games (player1_anon_id, player2_anon_id)

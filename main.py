@@ -35,6 +35,10 @@ GAME_KEYWORDS = {"игра", "ttt", "крестики", "нолики", "хоч�
 user_last_msg: dict[int, float] = {}
 user_spam_warnings: dict[int, int] = {}
 
+# Ideas tracking
+user_telling_idea: set[int] = set()
+admin_commenting_idea: int | None = None
+
 
 async def delete_waiting(target_user_id: int):
     msg_id = waiting_messages.pop(target_user_id, None)
@@ -567,7 +571,8 @@ async def cmd_start(message: Message):
 
     start_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="\U0001f3ae Бросить вызов Cookie", callback_data=f"user_ttt:{anon_id}"),
-         InlineKeyboardButton(text="\U0001f4a1 Мудрость дня", callback_data=f"wisdom:{anon_id}")]
+         InlineKeyboardButton(text="\U0001f4a1 Мудрость дня", callback_data=f"wisdom:{anon_id}")],
+        [InlineKeyboardButton(text="\U0001f4a1 Предложить идею", callback_data=f"user_idea:{anon_id}")],
     ])
     await message.answer(
         "\U0001f44b <b>Привет! Я анонимный бот.</b>\n\n"
@@ -657,12 +662,13 @@ async def cmd_help(message: Message):
 async def cmd_cancel(message: Message):
     if not is_admin(message.from_user.id):
         return
-    global admin_pending_reply, write_flow_step, write_flow_anon_id, add_user_step, rename_anon_id
+    global admin_pending_reply, write_flow_step, write_flow_anon_id, add_user_step, rename_anon_id, admin_commenting_idea
     admin_pending_reply = None
     write_flow_step = None
     write_flow_anon_id = None
     add_user_step = False
     rename_anon_id = None
+    admin_commenting_idea = None
     # Cancel any pending TTT challenge
     pending = db.get_player_game(ADMIN_ANON_ID, statuses=("pending",))
     if pending:
@@ -1029,7 +1035,7 @@ async def handle_callback(callback: CallbackQuery):
 
 
 async def _handle_callback(callback: CallbackQuery):
-    global admin_pending_reply, write_flow_step, write_flow_anon_id, rename_anon_id
+    global admin_pending_reply, write_flow_step, write_flow_anon_id, rename_anon_id, admin_commenting_idea
 
     parts = callback.data.split(":")
     action = parts[0]
@@ -1037,8 +1043,8 @@ async def _handle_callback(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         if action in ("ttt_accept", "ttt_decline", "ttt_move", "ttt_surrender", "ttt_rematch",
                        "appeal", "appeal_accept", "appeal_decline",
-                        "dice_accept", "dice_decline", "dice_rematch", "dice_my_stats", "dice_pgn",
-                        "wisdom", "user_ttt",
+                       "dice_accept", "dice_decline", "dice_rematch", "dice_my_stats", "dice_pgn",
+                       "wisdom", "user_ttt", "user_idea", "idea_accept", "idea_reject", "idea_comment",
                         "none"):
             pass
         else:
@@ -1497,6 +1503,53 @@ async def _handle_callback(callback: CallbackQuery):
             pass
         return
 
+    elif action == "user_idea":
+        if is_admin(callback.from_user.id):
+            await callback.answer()
+            return
+        anon_id = int(parts[1])
+        user_telling_idea.add(callback.from_user.id)
+        await callback.answer()
+        await callback.message.answer(
+            "\U0001f4a1 <b>Расскажите вашу идею</b>\n\n"
+            "Напишите, что бы вы хотели улучшить в боте.\n"
+            "Cookie рассмотрит ваше предложение!"
+        )
+        return
+
+    elif action == "idea_accept":
+        if not is_admin(callback.from_user.id):
+            await callback.answer()
+            return
+        idea_id = int(parts[1])
+        db.update_idea(idea_id, "accepted")
+        await callback.answer("✅ Идея принята!")
+        await callback.message.edit_text(f"✅ Идея #{idea_id} принята.")
+        return
+
+    elif action == "idea_reject":
+        if not is_admin(callback.from_user.id):
+            await callback.answer()
+            return
+        idea_id = int(parts[1])
+        db.update_idea(idea_id, "rejected")
+        await callback.answer("❌ Идея отклонена.")
+        await callback.message.edit_text(f"❌ Идея #{idea_id} отклонена.")
+        return
+
+    elif action == "idea_comment":
+        if not is_admin(callback.from_user.id):
+            await callback.answer()
+            return
+        idea_id = int(parts[1])
+        admin_commenting_idea = idea_id
+        await callback.answer("✏️ Напишите комментарий.")
+        await callback.message.answer(
+            f"✏️ <b>Напишите комментарий</b> к идее #{idea_id}.\n"
+            "/cancel — отменить"
+        )
+        return
+
     elif action == "wisdom":
         if is_admin(callback.from_user.id):
             anon_id = ADMIN_ANON_ID
@@ -1739,6 +1792,7 @@ BTN_ADD_ID = "\u2795 Добавить ID"
 BTN_TTT = "\U0001f3ae Крестики-нолики"
 BTN_DICE = "\U0001f3b2 Везение"
 BTN_WISDOM = "\U0001f4a1 Мудрость дня"
+BTN_IDEAS = "\U0001f4a1 Идеи пользователей"
 BTN_BCAST = "\U0001f4e2 Рассылка"
 BTN_HELP = "❓ Помощь"
 BTN_CANCEL = "❌ Отмена"
@@ -1752,7 +1806,7 @@ def admin_cmds_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text=BTN_LIST), KeyboardButton(text=BTN_BANNED)],
             [KeyboardButton(text=BTN_DELETED), KeyboardButton(text=BTN_BLOCKED)],
             [KeyboardButton(text=BTN_TTT), KeyboardButton(text=BTN_DICE)],
-            [KeyboardButton(text=BTN_DEL)],
+            [KeyboardButton(text=BTN_DEL), KeyboardButton(text=BTN_IDEAS)],
             [KeyboardButton(text=BTN_WISDOM), KeyboardButton(text=BTN_ADD_ID)],
             [KeyboardButton(text=BTN_BCAST)],
             [KeyboardButton(text=BTN_HELP), KeyboardButton(text=BTN_CANCEL)],
@@ -1763,14 +1817,14 @@ def admin_cmds_keyboard() -> ReplyKeyboardMarkup:
 
 
 BTN_CMDS = {BTN_WRITE, BTN_HISTORY, BTN_STATS, BTN_LIST, BTN_BANNED,
-            BTN_DELETED, BTN_DEL, BTN_BLOCKED, BTN_TTT, BTN_DICE, BTN_WISDOM, BTN_ADD_ID, BTN_BCAST, BTN_HELP, BTN_CANCEL}
+            BTN_DELETED, BTN_DEL, BTN_BLOCKED, BTN_TTT, BTN_DICE, BTN_WISDOM, BTN_IDEAS, BTN_ADD_ID, BTN_BCAST, BTN_HELP, BTN_CANCEL}
 
 
 # ────────────────────────────── Messages ──────────────────────────────
 
 @dp.message()
 async def handle_user_message(message: Message):
-    global admin_pending_reply, write_flow_step, write_flow_anon_id, add_user_step, rename_anon_id
+    global admin_pending_reply, write_flow_step, write_flow_anon_id, add_user_step, rename_anon_id, admin_commenting_idea
     user_id = message.from_user.id
 
     if is_admin(user_id):
@@ -1894,6 +1948,18 @@ async def handle_user_message(message: Message):
             )
             return
 
+        # ── Admin commenting on idea ──
+        if admin_commenting_idea is not None:
+            comment = (message.text or "").strip()
+            if comment:
+                idea_id = admin_commenting_idea
+                admin_commenting_idea = None
+                db.update_idea(idea_id, "accepted", comment)
+                await message.answer(f"✅ Комментарий добавлен к идее #{idea_id}.")
+            else:
+                await message.answer("❌ Комментарий не может быть пустым.")
+            return
+
         if message.text == BTN_WRITE:
             text, markup = paginated_users_list(1)
             await message.answer("\U0001f447 <b>Выбери пользователя</b> \u2014 нажми \u270d\ufe0f рядом с именем:", reply_markup=markup)
@@ -1931,6 +1997,23 @@ async def handle_user_message(message: Message):
             return
         if message.text == BTN_WISDOM:
             await message.answer(f"\U0001f4a1 <b>Мудрость дня</b>\n\n{wisdom_of_the_day(ADMIN_ANON_ID)}")
+            return
+        if message.text == BTN_IDEAS:
+            ideas = db.get_ideas()
+            if not ideas:
+                await message.answer("\U0001f4a1 <b>Идей пока нет.</b>")
+                return
+            lines = ["\U0001f4a1 <b>Идеи пользователей</b>\n"]
+            for s in ideas:
+                sid = s["id"]
+                status_emoji = "✅" if s["status"] == "accepted" else "\u23f3" if s["status"] == "pending" else "\u274c"
+                name = esc(s["first_name"] or f"#{s['anon_id']}")
+                text = esc(s["text"][:80])
+                lines.append(f"{status_emoji} #{sid} — {name}: {text}")
+            text = "\n".join(lines)
+            if len(text) > 4000:
+                text = text[:4000] + "\n\n..."
+            await message.answer(text)
             return
         if message.text == BTN_HELP:
             return await cmd_help(message)
@@ -2024,6 +2107,41 @@ async def handle_user_message(message: Message):
     user_msg_lower = user_msg_text
     if any(kw in user_msg_lower for kw in {"мудрость", "цитата", "мудрости"}):
         await message.answer(f"\U0001f4a1 <b>Мудрость дня</b>\n\n{wisdom_of_the_day(anon_id)}")
+        return
+
+    # ── User telling an idea ──
+    if user_id in user_telling_idea:
+        idea_text = (message.text or "").strip()
+        if idea_text:
+            user_telling_idea.discard(user_id)
+            idea_id = db.save_idea(anon_id, user_id, idea_text)
+            await message.answer("✅ Ваша идея отправлена Cookie на рассмотрение!")
+            idea_kb = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="✅ Принять", callback_data=f"idea_accept:{idea_id}"),
+                    InlineKeyboardButton(text="❌ Отклонить", callback_data=f"idea_reject:{idea_id}"),
+                ],
+                [InlineKeyboardButton(text="\U0001f4ac Комментарий", callback_data=f"idea_comment:{idea_id}")],
+            ])
+            await bot.send_message(
+                ADMIN_ID,
+                f"\U0001f4a1 <b>Новая идея</b>\n\n"
+                f"🆔 #{anon_id} {esc(user.first_name or '')}\n"
+                f"Идея: {esc(idea_text[:500])}",
+                reply_markup=idea_kb,
+            )
+        else:
+            await message.answer("❌ Идея не может быть пустой. Напишите вашу идею.")
+        return
+
+    # ── Idea keyword detection ──
+    if any(kw in user_msg_lower for kw in {"идея", "предложение", "улучшение"}):
+        user_telling_idea.add(user_id)
+        await message.answer(
+            "\U0001f4a1 <b>Расскажите вашу идею</b>\n\n"
+            "Напишите, что бы вы хотели улучшить в боте.\n"
+            "Cookie рассмотрит ваше предложение!"
+        )
         return
 
     last_admin_msg = db.get_last_admin_message(user_id)
