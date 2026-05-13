@@ -565,6 +565,10 @@ async def cmd_start(message: Message):
         message.from_user.language_code or "",
     )
 
+    start_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="\U0001f3ae Бросить вызов Cookie", callback_data=f"user_ttt:{anon_id}"),
+         InlineKeyboardButton(text="\U0001f4a1 Мудрость дня", callback_data=f"wisdom:{anon_id}")]
+    ])
     await message.answer(
         "\U0001f44b <b>Привет! Я анонимный бот.</b>\n\n"
         "Ты можешь написать мне любое сообщение, "
@@ -577,6 +581,7 @@ async def cmd_start(message: Message):
         f"\U0001f4a1 <b>Мудрость дня:</b>\n{wisdom_of_the_day(anon_id)}\n\n"
         "\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\n"
         "Напиши <b>«мудрость»</b> чтобы увидеть новую каждый день!",
+        reply_markup=start_kb,
     )
 
 
