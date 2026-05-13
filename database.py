@@ -407,6 +407,10 @@ class Database:
                 conn.execute("UPDATE ideas SET status = ?, admin_comment = ? WHERE id = ?", (status, comment, idea_id))
             else:
                 conn.execute("UPDATE ideas SET status = ? WHERE id = ?", (status, idea_id))
+
+    # ──────────── Dice game methods ────────────
+
+    def create_dice_game(self, p1_anon: int, p2_anon: int) -> int:
         with self._get_conn() as conn:
             cursor = conn.execute("""
                 INSERT INTO dice_games (player1_anon_id, player2_anon_id)
