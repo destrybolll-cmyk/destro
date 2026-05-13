@@ -1973,7 +1973,24 @@ async def handle_user_message(message: Message):
                 idea_id = admin_commenting_idea
                 admin_commenting_idea = None
                 db.update_idea(idea_id, "accepted", comment)
-                await message.answer(f"✅ Комментарий добавлен к идее #{idea_id}.")
+                # Try to send comment to user
+                ideas = db.get_ideas()
+                uid = None
+                for s in ideas:
+                    if s["id"] == idea_id:
+                        uid = s["user_id"]
+                        break
+                if uid:
+                    try:
+                        await bot.send_message(
+                            uid,
+                            f"\U0001f4ac <b>Cookie оставил комментарий к вашей идее:</b>\n\n{esc(comment[:500])}"
+                        )
+                        await message.answer(f"✅ Комментарий к идее #{idea_id} отправлен пользователю.")
+                    except Exception:
+                        await message.answer(f"✅ Комментарий сохранён, но не удалось доставить пользователю.")
+                else:
+                    await message.answer(f"✅ Комментарий добавлен к идее #{idea_id}.")
             else:
                 await message.answer("❌ Комментарий не может быть пустым.")
             return
