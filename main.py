@@ -584,7 +584,6 @@ async def cmd_start(message: Message):
         "\U0001f3ae <b>Хочешь сыграть в крестики-нолики?</b>\n"
         "Напиши \u00abигра\u00bb или \u00abttt\u00bb и я передам вызов!\n\n"
         f"\U0001f4a1 <b>Мудрость дня:</b>\n{wisdom_of_the_day(anon_id)}\n\n"
-        "\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\n"
         "Напиши <b>«мудрость»</b> чтобы увидеть новую каждый день!",
         reply_markup=start_kb,
     )
@@ -2140,6 +2139,11 @@ async def handle_user_message(message: Message):
 
     # ── User telling an idea ──
     if user_id in user_telling_idea:
+        today_count = db.count_today_ideas(user_id)
+        if today_count >= 3:
+            user_telling_idea.discard(user_id)
+            await message.answer("\u26a0\ufe0f <b>Лимит идей на сегодня исчерпан.</b> (3/3)\n\nПопробуйте завтра!")
+            return
         idea_text = (message.text or "").strip()
         if idea_text:
             user_telling_idea.discard(user_id)
@@ -2165,9 +2169,13 @@ async def handle_user_message(message: Message):
 
     # ── Idea keyword detection ──
     if any(kw in user_msg_lower for kw in {"идея", "предложение", "улучшение"}):
+        today_count = db.count_today_ideas(user_id)
+        if today_count >= 3:
+            await message.answer("\u26a0\ufe0f <b>Лимит идей на сегодня исчерпан.</b>\n\nВы можете предложить не более 3 идей в день. Попробуйте завтра!")
+            return
         user_telling_idea.add(user_id)
         await message.answer(
-            "\U0001f4a1 <b>Расскажите вашу идею</b>\n\n"
+            f"\U0001f4a1 <b>Расскажите вашу идею</b> ({today_count + 1}/3)\n\n"
             "Напишите, что бы вы хотели улучшить в боте.\n"
             "Cookie рассмотрит ваше предложение!"
         )

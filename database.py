@@ -393,6 +393,14 @@ class Database:
         with self._get_conn() as conn:
             return conn.execute("SELECT * FROM ideas WHERE id = ?", (idea_id,)).fetchone()
 
+    def count_today_ideas(self, user_id: int) -> int:
+        with self._get_conn() as conn:
+            r = conn.execute("""
+                SELECT COUNT(*) FROM ideas
+                WHERE user_id = ? AND date(created_at) = date('now')
+            """, (user_id,)).fetchone()
+            return r[0] if r else 0
+
     def update_idea(self, idea_id: int, status: str, comment: str = ""):
         with self._get_conn() as conn:
             if comment:
