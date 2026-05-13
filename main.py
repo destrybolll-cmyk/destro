@@ -1033,7 +1033,7 @@ async def _handle_callback(callback: CallbackQuery):
         if action in ("ttt_accept", "ttt_decline", "ttt_move", "ttt_surrender", "ttt_rematch",
                        "appeal", "appeal_accept", "appeal_decline",
                         "dice_accept", "dice_decline", "dice_rematch", "dice_my_stats", "dice_pgn",
-                        "wisdom",
+                        "wisdom", "user_ttt",
                         "none"):
             pass
         else:
@@ -1451,6 +1451,45 @@ async def _handle_callback(callback: CallbackQuery):
                 )
             except Exception:
                 pass
+        return
+
+    elif action == "user_ttt":
+        if is_admin(callback.from_user.id):
+            await callback.answer()
+            return
+        anon_id = int(parts[1])
+        user_game = db.get_player_game(anon_id)
+        if user_game:
+            await callback.answer("❌ Вы уже в игре.", show_alert=True)
+            return
+        admin_game = db.get_player_game(ADMIN_ANON_ID)
+        if admin_game:
+            await callback.answer("❌ Cookie уже в игре с другим человеком.", show_alert=True)
+            return
+        target_user_id = db.get_user_id_by_anon(anon_id)
+        if target_user_id is None:
+            await callback.answer("❌ Ошибка.", show_alert=True)
+            return
+        game_id = db.create_game(ADMIN_ANON_ID, anon_id, ADMIN_ID, target_user_id, None)
+        await callback.answer()
+        await callback.message.answer("✅ Вызов отправлен Cookie! Ожидайте ответа.")
+        accept_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Принять", callback_data=f"ttt_accept:{game_id}"),
+                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"ttt_decline:{game_id}"),
+            ]
+        ])
+        await bot.send_message(
+            ADMIN_ID,
+            f"\U0001f3ae Пользователь #<b>{anon_id}</b> бросил вам вызов в крестики-нолики!",
+            reply_markup=accept_kb,
+        )
+        try:
+            uid = db.get_user_id_by_anon(anon_id)
+            if uid:
+                await bot.send_message(uid, "Ожидайте ответа от Cookie...")
+        except Exception:
+            pass
         return
 
     elif action == "wisdom":
@@ -1958,6 +1997,7 @@ async def handle_user_message(message: Message):
         return
     user_last_msg[user_id] = now
 
+    # Register user first so we have anon_id
     user = message.from_user
     anon_id, is_banned = db.add_user(
         user_id,
@@ -1966,8 +2006,17 @@ async def handle_user_message(message: Message):
         user.language_code or "",
     )
 
+    # ── User TTT challenge initiation ──
+    user_msg_text = (message.text or message.caption or "").lower()
+    if any(kw in user_msg_text for kw in GAME_KEYWORDS):
+        challenge_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="\U0001f3ae Бросить вызов", callback_data=f"user_ttt:{anon_id}")]
+        ])
+        await message.answer("\U0001f3ae Хотите бросить вызов Cookie?", reply_markup=challenge_kb)
+        return
+
     # Wisdom keyword detection
-    user_msg_lower = (message.text or message.caption or "").lower()
+    user_msg_lower = user_msg_text
     if any(kw in user_msg_lower for kw in {"мудрость", "цитата", "мудрости"}):
         await message.answer(f"\U0001f4a1 <b>Мудрость дня</b>\n\n{wisdom_of_the_day(anon_id)}")
         return
