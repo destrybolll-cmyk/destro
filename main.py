@@ -2281,8 +2281,9 @@ async def handle_healthcheck(reader, writer):
 
 
 async def run_healthcheck():
-    server = await asyncio.start_server(handle_healthcheck, host="0.0.0.0", port=8080)
-    logging.info("\U0001fa7a Healthcheck server on :8080")
+    health_port = int(os.getenv("PORT", 8080))
+    server = await asyncio.start_server(handle_healthcheck, host="0.0.0.0", port=health_port)
+    logging.info(f"\U0001fa7a Healthcheck server on :{health_port}")
     async with server:
         await server.serve_forever()
 
