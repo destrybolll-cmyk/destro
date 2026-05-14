@@ -568,7 +568,7 @@ async def cmd_start(message: Message):
     )
     if message.from_user.username:
         user_info += f"\n\U0001f517 @{esc(message.from_user.username)}"
-    user_info += f"\n\U0001f511 Telegram ID: <code>{message.from_user.id}</code>"
+    user_info += f"\n\U0001f511 <a href=\"tg://user?id={message.from_user.id}\">Telegram ID: {message.from_user.id}</a>"
     await bot.send_message(ADMIN_ID, user_info)
 
     start_kb = InlineKeyboardMarkup(inline_keyboard=[
