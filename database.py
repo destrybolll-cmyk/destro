@@ -169,12 +169,6 @@ class Database:
             )''',
         ]:
             self._exec(sql)
-        # Migrations for existing tables
-        for col in ["is_deleted", "language_code", "is_blocked", "appeal_count", "last_appeal", "cookies"]:
-            try:
-                self._exec(f"ALTER TABLE users ADD COLUMN {col} TEXT DEFAULT ''")
-            except Exception:
-                pass
     # ──────────── User methods ────────────
 
     def add_user(self, user_id: int, first_name: str = "", username: str = "", language_code: str = "") -> tuple:
@@ -366,6 +360,9 @@ class Database:
     def create_dice_game(self, p1_anon: int, p2_anon: int) -> int:
         self._exec("INSERT INTO dice_games (player1_anon_id, player2_anon_id) VALUES (?, ?)", [p1_anon, p2_anon])
         return self._lastrowid()
+
+    def get_dice_game(self, game_id: int):
+        return self._fetchone("SELECT * FROM dice_games WHERE id = ?", [game_id])
 
     def finish_dice_game(self, game_id: int, p1_score: int, p2_score: int):
         winner = ""

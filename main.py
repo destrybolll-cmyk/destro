@@ -5,7 +5,6 @@ import os
 import random
 import secrets
 import time
-import sqlite3
 from datetime import datetime
 
 from aiogram import Bot, Dispatcher
@@ -494,18 +493,10 @@ def dice_game_list(page: int = 1):
 
 
 async def dice_play_game(game_id: int):
-    # Fetch game from DB to get player IDs
-    # dice_games: player1=admin, player2=user
-    p1_anon = ADMIN_ANON_ID
-    p2_anon = None
-    # We need to get p2_anon from the dice_games table
-    with sqlite3.connect(db_path) as conn:
-        conn.row_factory = sqlite3.Row
-        row = conn.execute("SELECT * FROM dice_games WHERE id = ?", (game_id,)).fetchone()
-        if row:
-            p2_anon = row["player2_anon_id"]
-    if p2_anon is None:
+    game = db.get_dice_game(game_id)
+    if not game:
         return
+    p2_anon = game["player2_anon_id"]
     p2_uid = db.get_user_id_by_anon(p2_anon)
     if p2_uid is None:
         return
@@ -1304,11 +1295,8 @@ async def _handle_callback(callback: CallbackQuery):
 
     elif action == "dice_accept":
         game_id = int(parts[1])
-        # Verify the clicker is the challenged user
         clicker_anon = db.get_anon_id_by_user_id(callback.from_user.id)
-        with sqlite3.connect(db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            dg = conn.execute("SELECT * FROM dice_games WHERE id = ?", (game_id,)).fetchone()
+        dg = db.get_dice_game(game_id)
         if dg and clicker_anon and clicker_anon != dg["player2_anon_id"]:
             await callback.answer("❌ Это не ваш вызов.", show_alert=True)
             return
@@ -1333,10 +1321,7 @@ async def _handle_callback(callback: CallbackQuery):
 
     elif action == "dice_rematch":
         old_id = int(parts[1])
-        # Get the old game to know who the opponent is
-        with sqlite3.connect(db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            old = conn.execute("SELECT * FROM dice_games WHERE id = ?", (old_id,)).fetchone()
+        old = db.get_dice_game(old_id)
         if not old:
             await callback.answer("❌ Игра не найдена.", show_alert=True)
             return
