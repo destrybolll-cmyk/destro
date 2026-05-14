@@ -39,6 +39,7 @@ class Database:
     def __init__(self, db_path: str = ""):
         self.db_url = os.getenv("TURSO_DB_URL", "https://cookie-anon-bot-destrybolll-cmyk.aws-us-west-2.turso.io")
         self.db_token = os.getenv("TURSO_DB_TOKEN", "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3Nzg3NjM3MzQsImlkIjoiMDE5ZTI2OTQtMWUwMS03MWM5LWI3ZTQtMDA2MDQ5OWU4ZTZlIiwicmlkIjoiMmI2YTQzYzItZDhjNS00OGRjLTk0NTYtMjNhM2JmNjkwOWIwIn0.d7jSily5EfbjH34WM3-Gq6kYcVFc1b0xmpQJk91iQunrVXw9-mUZUZVoXQdX2OdKgfoQde3M0CwDHCFq6b6HBw")
+        self._last_rowid = 0
         self._init_db()
 
     def _req(self, sql: str, params: list = None, readonly: bool = False) -> dict:
@@ -48,10 +49,12 @@ class Database:
             for v in params:
                 if v is None:
                     typed_args.append({"type": "null"})
+                elif isinstance(v, bool):
+                    typed_args.append({"type": "text", "value": "1" if v else "0"})
                 elif isinstance(v, int):
-                    typed_args.append({"type": "integer", "value": v})
+                    typed_args.append({"type": "text", "value": str(v)})
                 elif isinstance(v, float):
-                    typed_args.append({"type": "float", "value": v})
+                    typed_args.append({"type": "text", "value": str(v)})
                 else:
                     typed_args.append({"type": "text", "value": str(v)})
             stmt["args"] = typed_args
@@ -70,17 +73,28 @@ class Database:
         r = result["results"][0]
         if r["type"] != "ok":
             raise Exception(f"DB error: {r}")
-        return r["response"]["result"]
+        res = r["response"]["result"]
+        lid = res.get("last_insert_rowid")
+        if lid is not None:
+            self._last_rowid = int(lid)
+        return res
 
     def _exec(self, sql: str, params: list = None) -> dict:
-        return self._req(sql, params)
+        r = self._req(sql, params)
+        try:
+            lid = r.get("last_insert_rowid")
+            if lid is not None:
+                return {"rowid": int(lid)}
+        except Exception:
+            pass
+        return r
 
     def _fetchall(self, sql: str, params: list = None) -> list:
         r = self._req(sql, params)
         cols = r.get("cols", [])
         return [TursoRow(cols, row) for row in r.get("rows", [])]
 
-    def _fetchone(self, sql: str, params: list = None) -> Optional[TursoRow]:
+    def _fetchone(self, sql: str, params: list = None):
         rows = self._fetchall(sql, params)
         return rows[0] if rows else None
 
@@ -90,15 +104,14 @@ class Database:
         return rows[0][0] if rows else None
 
     def _lastrowid(self) -> int:
-        r = self._req("SELECT last_insert_rowid() AS id")
-        return r["rows"][0][0]
+        return self._last_rowid
 
     def _init_db(self):
         for sql in [
             '''CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER UNIQUE NOT NULL,
                 first_name TEXT DEFAULT '', username TEXT DEFAULT '', language_code TEXT DEFAULT '',
-                is_banned INTEGER DEFAULT 0, is_blocked INTEGER DEFAULT 0,
+                is_banned INTEGER DEFAULT 0, is_blocked INTEGER DEFAULT 0, is_deleted INTEGER DEFAULT 0,
                 appeal_count INTEGER DEFAULT 0, last_appeal TIMESTAMP,
                 cookies INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -134,6 +147,12 @@ class Database:
             )''',
         ]:
             self._exec(sql)
+        # Migrations for existing tables
+        for col in ["is_deleted", "language_code", "is_blocked", "appeal_count", "last_appeal", "cookies"]:
+            try:
+                self._exec(f"ALTER TABLE users ADD COLUMN {col} TEXT DEFAULT ''")
+            except Exception:
+                pass
     # ──────────── User methods ────────────
 
     def add_user(self, user_id: int, first_name: str = "", username: str = "", language_code: str = "") -> tuple:
