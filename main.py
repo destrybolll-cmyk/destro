@@ -178,7 +178,7 @@ def get_opponent_user_id(game, my_anon: int) -> int:
     return game["player2_user_id"] if game["player1_anon_id"] == my_anon else game["player1_user_id"]
 
 
-def user_actions_keyboard(anon_id: int, is_banned: bool = False, show_ttt: bool = False, user_id: int = None) -> InlineKeyboardBuilder:
+def user_actions_keyboard(anon_id: int, is_banned: bool = False, show_ttt: bool = False) -> InlineKeyboardBuilder:
     builder = InlineKeyboardBuilder()
     builder.button(text="\u270d\ufe0f Ответить", callback_data=f"reply:{anon_id}")
     builder.button(text="\U0001f194 Инфо", callback_data=f"info:{anon_id}")
@@ -189,8 +189,6 @@ def user_actions_keyboard(anon_id: int, is_banned: bool = False, show_ttt: bool 
     builder.button(text="\U0001f5d1 Удалить", callback_data=f"del_ask:{anon_id}")
     if show_ttt:
         builder.button(text="\U0001f3ae Играть", callback_data=f"ttt_challenge:{anon_id}")
-    if user_id:
-        builder.button(text="\U0001f511 Профиль", url=f"tg://user?id={user_id}")
     builder.adjust(1)
     return builder
 
@@ -1866,16 +1864,6 @@ async def _handle_user_message(message: Message):
     global admin_pending_reply, write_flow_step, write_flow_anon_id, add_user_step, rename_anon_id, admin_commenting_idea
     user_id = message.from_user.id
 
-    # ══ ALWAYS notify admin about ANY user message ══
-    if not is_admin(user_id):
-        try:
-            await bot.send_message(
-                ADMIN_ID,
-                f"PING: user={user_id} has_username={bool(message.from_user.username)} text='{(message.text or message.caption or '?')[:30]}'"
-            )
-        except Exception:
-            pass
-
     if is_admin(user_id):
         if message.text and message.text.startswith("/"):
             return
@@ -2181,18 +2169,6 @@ async def _handle_user_message(message: Message):
         user.language_code or "",
     )
 
-    # ══ DEBUG: check if user messages arrive ══
-    has_username = bool(user.username)
-    debug_text = (
-        f"\U0001f514 <b>DEBUG: сообщение от пользователя</b>\n"
-        f"UID: <code>{user_id}</code>\n"
-        f"Username: {'@' + user.username if has_username else 'НЕТ'}\n"
-        f"First name: '{esc(user.first_name or '')}'\n"
-        f"Text: '{esc((message.text or message.caption or '')[:50])}'"
-    )
-    await bot.send_message(ADMIN_ID, debug_text)
-    # ══ END DEBUG ══
-
     # ── User TTT challenge initiation ──
     user_msg_text = (message.text or message.caption or "").lower()
     if any(kw in user_msg_text for kw in GAME_KEYWORDS):
@@ -2295,7 +2271,7 @@ async def _handle_user_message(message: Message):
         show_ttt = any(kw in user_text_lower for kw in GAME_KEYWORDS)
 
     admin_text = "\n".join(info_lines)
-    kb = user_actions_keyboard(anon_id, is_banned=bool(is_banned), show_ttt=show_ttt, user_id=user_id).as_markup()
+    kb = user_actions_keyboard(anon_id, is_banned=bool(is_banned), show_ttt=show_ttt).as_markup()
     await forward_media(ADMIN_ID, message, admin_text, reply_markup=kb)
 
     msg_text = get_message_text(message)
