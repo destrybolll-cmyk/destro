@@ -1845,6 +1845,21 @@ BTN_CMDS = {BTN_WRITE, BTN_HISTORY, BTN_STATS, BTN_LIST, BTN_BANNED,
 @dp.message()
 async def handle_user_message(message: Message):
     global admin_pending_reply, write_flow_step, write_flow_anon_id, add_user_step, rename_anon_id, admin_commenting_idea
+    try:
+        await _handle_user_message(message)
+    except Exception as e:
+        logging.error(f"Message handler error: {e}", exc_info=True)
+        if is_admin(message.from_user.id):
+            await message.answer(f"❌ Ошибка: {esc(str(e)[:200])}")
+        else:
+            try:
+                await message.answer("🍪 Произошла ошибка. Попробуйте ещё раз.")
+            except Exception:
+                pass
+
+
+async def _handle_user_message(message: Message):
+    global admin_pending_reply, write_flow_step, write_flow_anon_id, add_user_step, rename_anon_id, admin_commenting_idea
     user_id = message.from_user.id
 
     if is_admin(user_id):
