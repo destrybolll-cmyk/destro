@@ -2227,6 +2227,7 @@ async def handle_user_message(message: Message):
         info_lines.append(f"\U0001f517 @{esc(user.username)}")
     if user.language_code:
         info_lines.append(f"\U0001f310 {user.language_code}")
+    info_lines.append(f"\U0001f511 <a href=\"tg://user?id={user_id}\">Профиль</a>")
 
     if reply_context:
         info_lines.append("")
