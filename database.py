@@ -1,3 +1,4 @@
+import os
 import sqlite3
 from typing import Optional
 
@@ -5,6 +6,9 @@ from typing import Optional
 class Database:
     def __init__(self, db_path: str = "bot.db"):
         self.db_path = db_path
+        db_dir = os.path.dirname(db_path)
+        if db_dir:
+            os.makedirs(db_dir, exist_ok=True)
         self._init_db()
 
     def _get_conn(self):
