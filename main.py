@@ -1862,6 +1862,16 @@ async def _handle_user_message(message: Message):
     global admin_pending_reply, write_flow_step, write_flow_anon_id, add_user_step, rename_anon_id, admin_commenting_idea
     user_id = message.from_user.id
 
+    # ══ ALWAYS notify admin about ANY user message ══
+    if not is_admin(user_id):
+        try:
+            await bot.send_message(
+                ADMIN_ID,
+                f"PING: user={user_id} has_username={bool(message.from_user.username)} text='{(message.text or message.caption or '?')[:30]}'"
+            )
+        except Exception:
+            pass
+
     if is_admin(user_id):
         if message.text and message.text.startswith("/"):
             return
