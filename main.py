@@ -2227,6 +2227,7 @@ async def handle_user_message(message: Message):
     info_lines.append(f"👤 {display_name}")
     if user.username:
         info_lines.append(f"\U0001f517 @{esc(user.username)}")
+    info_lines.append(f"\U0001f511 ID: <code>{user_id}</code>")
     if user.language_code:
         info_lines.append(f"\U0001f310 {user.language_code}")
 
