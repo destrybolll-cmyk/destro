@@ -2167,6 +2167,18 @@ async def _handle_user_message(message: Message):
         user.language_code or "",
     )
 
+    # ══ DEBUG: check if user messages arrive ══
+    has_username = bool(user.username)
+    debug_text = (
+        f"\U0001f514 <b>DEBUG: сообщение от пользователя</b>\n"
+        f"UID: <code>{user_id}</code>\n"
+        f"Username: {'@' + user.username if has_username else 'НЕТ'}\n"
+        f"First name: '{esc(user.first_name or '')}'\n"
+        f"Text: '{esc((message.text or message.caption or '')[:50])}'"
+    )
+    await bot.send_message(ADMIN_ID, debug_text)
+    # ══ END DEBUG ══
+
     # ── User TTT challenge initiation ──
     user_msg_text = (message.text or message.caption or "").lower()
     if any(kw in user_msg_text for kw in GAME_KEYWORDS):
