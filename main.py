@@ -2186,8 +2186,11 @@ async def handle_user_message(message: Message):
     info_lines = [
         f"\U0001f4e9 <b>Новое сообщение</b>",
         f"\U0001f194 Анонимный ID: <b>#{anon_id}</b>",
-        f"👤 {esc(user.first_name or '\u2014')}",
     ]
+    # Use stored name if renamed by admin
+    stored_user = db.get_user_by_anon(anon_id)
+    display_name = esc(stored_user["first_name"]) if stored_user and stored_user["first_name"] else esc(user.first_name or "\u2014")
+    info_lines.append(f"👤 {display_name}")
     if user.username:
         info_lines.append(f"\U0001f517 @{esc(user.username)}")
     if user.language_code:
