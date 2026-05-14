@@ -7,7 +7,7 @@ from typing import Optional, Any
 class TursoRow:
     def __init__(self, cols: list, row: list):
         self._cols = [c["name"] for c in cols]
-        self._vals = row
+        self._vals = [v.get("value") if isinstance(v, dict) else v for v in row]
 
     def __getitem__(self, key):
         if isinstance(key, int):
@@ -101,7 +101,12 @@ class Database:
     def _fetchval(self, sql: str, params: list = None):
         r = self._req(sql, params)
         rows = r.get("rows", [])
-        return rows[0][0] if rows else None
+        if not rows:
+            return None
+        v = rows[0][0]
+        if isinstance(v, dict):
+            return v.get("value")
+        return v
 
     def _lastrowid(self) -> int:
         return self._last_rowid
