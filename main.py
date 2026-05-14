@@ -560,6 +560,17 @@ async def cmd_start(message: Message):
         message.from_user.language_code or "",
     )
 
+    # Notify admin about new user
+    user_info = (
+        f"\U0001f4e5 <b>Новый пользователь</b>\n\n"
+        f"\U0001f194 ID: <b>#{anon_id}</b>\n"
+        f"\U0001f464 {esc(message.from_user.first_name or '—')}"
+    )
+    if message.from_user.username:
+        user_info += f"\n\U0001f517 @{esc(message.from_user.username)}"
+    user_info += f"\n\U0001f511 Telegram ID: <code>{message.from_user.id}</code>"
+    await bot.send_message(ADMIN_ID, user_info)
+
     start_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="\U0001f3ae Бросить вызов Cookie", callback_data=f"user_ttt:{anon_id}"),
          InlineKeyboardButton(text="\U0001f4a1 Мудрость дня", callback_data=f"wisdom:{anon_id}")],
