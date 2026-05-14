@@ -1860,6 +1860,10 @@ async def handle_user_message(message: Message):
             if message.text is None:
                 await message.answer("❌ Пожалуйста, введи ID числом.")
                 return
+            if message.text == BTN_CANCEL or message.text == "/cancel":
+                write_flow_step = None
+                await cmd_cancel(message)
+                return
             try:
                 anon_id = int(message.text)
                 if not db.user_exists_by_anon(anon_id):
@@ -1874,6 +1878,11 @@ async def handle_user_message(message: Message):
             return
 
         if write_flow_step == "await_text":
+            if message.text == BTN_CANCEL or message.text == "/cancel":
+                write_flow_step = None
+                write_flow_anon_id = None
+                await cmd_cancel(message)
+                return
             target_user_id = db.get_user_id_by_anon(write_flow_anon_id)
             if target_user_id is None:
                 await message.answer("❌ Пользователь больше не существует.")
@@ -1912,6 +1921,10 @@ async def handle_user_message(message: Message):
         if add_user_step:
             if message.text is None:
                 await message.answer("❌ ID должен быть числом.")
+                return
+            if message.text == BTN_CANCEL or message.text == "/cancel":
+                add_user_step = False
+                await cmd_cancel(message)
                 return
             try:
                 uid = int(message.text.strip())
@@ -1953,6 +1966,10 @@ async def handle_user_message(message: Message):
 
         if rename_anon_id is not None:
             text = message.text or ""
+            if message.text == BTN_CANCEL or message.text == "/cancel":
+                rename_anon_id = None
+                await cmd_cancel(message)
+                return
             if not text.strip():
                 await message.answer("❌ Имя не может быть пустым.")
                 return
@@ -1968,6 +1985,10 @@ async def handle_user_message(message: Message):
 
         # ── Admin commenting on idea ──
         if admin_commenting_idea is not None:
+            if message.text == BTN_CANCEL or message.text == "/cancel":
+                admin_commenting_idea = None
+                await cmd_cancel(message)
+                return
             comment = (message.text or "").strip()
             if comment:
                 idea_id = admin_commenting_idea
