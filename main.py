@@ -2299,10 +2299,24 @@ async def daily_wisdom_task():
         logging.info(f"\U0001f4a1 Daily wisdom sent to {sent} users")
 
 
+async def keep_awake_task():
+    """Ping Render health endpoint every 10 minutes to prevent sleeping."""
+    self_url = "https://cookie-anon-bot.onrender.com/health"
+    while True:
+        await asyncio.sleep(600)  # 10 minutes
+        try:
+            import urllib.request
+            urllib.request.urlopen(self_url, timeout=10)
+        except Exception:
+            pass
+
+
 # ────────────────────────────── Entry ──────────────────────────
 
 async def main():
     healthcheck_task = asyncio.create_task(run_healthcheck())
+    wisdom_task = asyncio.create_task(daily_wisdom_task())
+    keep_awake = asyncio.create_task(keep_awake_task())
     while True:
         try:
             logging.info("\U0001f680 Бот запущен!")
