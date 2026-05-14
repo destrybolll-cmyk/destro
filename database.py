@@ -7,7 +7,20 @@ from typing import Optional, Any
 class TursoRow:
     def __init__(self, cols: list, row: list):
         self._cols = [c["name"] for c in cols]
-        self._vals = [v.get("value") if isinstance(v, dict) else v for v in row]
+        self._vals = []
+        for v in row:
+            if isinstance(v, dict):
+                t = v.get("type", "text")
+                val = v.get("value")
+                if t == "integer" or t == "float":
+                    val = int(val) if "." not in str(val) else float(val)
+                elif t == "null" or val is None:
+                    val = None
+                elif t == "text":
+                    pass
+                self._vals.append(val)
+            else:
+                self._vals.append(v)
 
     def __getitem__(self, key):
         if isinstance(key, int):
@@ -105,7 +118,11 @@ class Database:
             return None
         v = rows[0][0]
         if isinstance(v, dict):
-            return v.get("value")
+            t = v.get("type", "text")
+            val = v.get("value")
+            if t == "integer" or t == "float":
+                return int(val) if "." not in str(val) else float(val)
+            return val
         return v
 
     def _lastrowid(self) -> int:
