@@ -2315,15 +2315,19 @@ async def daily_wisdom_task():
 
 async def main():
     healthcheck_task = asyncio.create_task(run_healthcheck())
-    wisdom_task = asyncio.create_task(daily_wisdom_task())
     while True:
         try:
             logging.info("\U0001f680 Бот запущен!")
             await dp.start_polling(bot, skip_updates=True)
         except Exception as e:
-            logging.error(f"Критическая ошибка: {e}", exc_info=True)
-            logging.info("Перезапуск через 5 секунд...")
-            await asyncio.sleep(5)
+            err_str = str(e).lower()
+            if "conflict" in err_str:
+                logging.info("Conflict — другой экземпляр, переподключение через 1с...")
+                await asyncio.sleep(1)
+            else:
+                logging.error(f"Критическая ошибка: {e}", exc_info=True)
+                logging.info("Перезапуск через 5 секунд...")
+                await asyncio.sleep(5)
 
 
 if __name__ == "__main__":
