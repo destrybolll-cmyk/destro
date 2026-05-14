@@ -174,8 +174,8 @@ class Database:
     def add_user(self, user_id: int, first_name: str = "", username: str = "", language_code: str = "") -> tuple:
         existing = self._fetchone("SELECT id, is_banned, is_deleted FROM users WHERE user_id = ?", [user_id])
         if existing:
-            self._exec("UPDATE users SET first_name = ?, username = ?, language_code = ?, last_active = CURRENT_TIMESTAMP, is_deleted = 0 WHERE user_id = ?",
-                       [first_name, username, language_code, user_id])
+            self._exec("UPDATE users SET language_code = ?, last_active = CURRENT_TIMESTAMP, is_deleted = 0 WHERE user_id = ?",
+                       [language_code, user_id])
             return existing["id"], existing["is_banned"]
         self._exec("INSERT INTO users (user_id, first_name, username, language_code) VALUES (?, ?, ?, ?)",
                    [user_id, first_name, username, language_code])
