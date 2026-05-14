@@ -1856,6 +1856,10 @@ async def handle_user_message(message: Message):
                 await message.answer("🍪 Произошла ошибка. Попробуйте ещё раз.")
             except Exception:
                 pass
+        try:
+            await bot.send_message(ADMIN_ID, f"❌ <b>Ошибка обработки сообщения</b>\nUID: <code>{message.from_user.id}</code>\n{esc(str(e)[:300])}")
+        except Exception:
+            pass
 
 
 async def _handle_user_message(message: Message):
