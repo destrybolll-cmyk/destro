@@ -2295,7 +2295,7 @@ async def _handle_user_message(message: Message):
 
     last_admin_msg = db.get_last_admin_message(user_id)
     if last_admin_msg:
-        reply_context = f"\U0001f4ce <b>Ответ на ваше сообщение:</b>\n\u2514 {esc(last_admin_msg[:100])}"
+        reply_context = f"\U0001f4ce <b>Ответ на ваше сообщение:</b>\n\u2514 {esc(last_admin_msg[:500])}"
     else:
         reply_context = None
 
