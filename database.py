@@ -300,14 +300,14 @@ class Database:
 
     def get_user_messages(self, anon_id: int, page: int = 1, per_page: int = 20, date_filter: str = None):
         offset = (page - 1) * per_page
-        where = "m.anon_id = ?"
+        where = "messages.anon_id = ?"
         params = [anon_id]
         if date_filter == "today":
-            where += " AND date(m.timestamp) = date('now')"
+            where += " AND date(messages.timestamp) = date('now')"
         elif date_filter == "yesterday":
-            where += " AND date(m.timestamp) = date('now', '-1 day')"
+            where += " AND date(messages.timestamp) = date('now', '-1 day')"
         elif date_filter:
-            where += " AND date(m.timestamp) = date(?)"
+            where += " AND date(messages.timestamp) = date(?)"
             params.append(date_filter)
         rows = self._fetchall(
             f"""SELECT m.*, u.first_name, u.username FROM messages m
@@ -443,3 +443,6 @@ class Database:
 
     def update_diary_entry(self, entry_id: int, text: str):
         self._exec("UPDATE diary SET text = ? WHERE id = ?", [text, entry_id])
+
+    def delete_diary_entry(self, entry_id: int):
+        self._exec("DELETE FROM diary WHERE id = ?", [entry_id])
