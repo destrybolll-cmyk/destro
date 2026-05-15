@@ -2884,11 +2884,19 @@ async def handle_http(reader, writer):
 
 async def run_http_server():
     health_port = int(os.getenv("PORT", 8080))
-    server = await asyncio.start_server(handle_http, host="0.0.0.0", port=health_port)
+    for attempt in range(5):
+        try:
+            server = await asyncio.start_server(handle_http, host="0.0.0.0", port=health_port, reuse_address=True, reuse_port=True)
+            break
+        except OSError as e:
+            if attempt < 4:
+                await asyncio.sleep(2)
+                continue
+            logging.error(f"Failed to start HTTP server: {e}")
+            return
     logging.info(f"\U0001fa7a HTTP server on :{health_port}")
     async with server:
         await server.serve_forever()
-    await asyncio.Event().wait()
 
 
 async def daily_wisdom_task():
