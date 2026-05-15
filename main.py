@@ -2104,6 +2104,7 @@ async def _handle_callback(callback: CallbackQuery):
             return
         lines = [f"\U0001f4dc <b>Вся история сообщений</b> (стр. {page}/{total_pages}):\n"]
         current_id = None
+        num = (page - 1) * 15 + 1
         for m in msgs:
             if m["anon_id"] != current_id:
                 current_id = m["anon_id"]
@@ -2112,7 +2113,8 @@ async def _handle_callback(callback: CallbackQuery):
                 lines.append(f"\n👤 #{current_id} \u2014 {name}{username}")
             ts = local_time(m["timestamp"])
             icon = "\u2709\ufe0f" if m["direction"] == "admin_to_user" else "\U0001f4e9"
-            lines.append(f"  {icon} ({ts}) {esc(m['text'][:100])}")
+            lines.append(f"  <b>{num}.</b> {icon} ({ts}) {esc(m['text'][:100])}")
+            num += 1
         text = "\n".join(lines)
         if len(text) > 4000:
             text = text[:4000] + "\n\n..."
