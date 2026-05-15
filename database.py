@@ -288,6 +288,28 @@ class Database:
             WHERE m.timestamp >= datetime('now', ?) ORDER BY m.timestamp ASC""",
             [f"-{minutes} minutes"])
 
+    def get_all_messages(self, page: int = 1, per_page: int = 15):
+        offset = (page - 1) * per_page
+        rows = self._fetchall(
+            """SELECT m.*, u.first_name, u.username FROM messages m
+            LEFT JOIN users u ON m.user_id = u.user_id
+            ORDER BY m.timestamp DESC LIMIT ? OFFSET ?""", [per_page, offset])
+        total = self._fetchval("SELECT COUNT(*) FROM messages")
+        total_pages = max(1, (total + per_page - 1) // per_page)
+        return rows, total_pages
+
+    def get_user_messages(self, anon_id: int, page: int = 1, per_page: int = 20):
+        offset = (page - 1) * per_page
+        rows = self._fetchall(
+            """SELECT m.*, u.first_name, u.username FROM messages m
+            LEFT JOIN users u ON m.user_id = u.user_id
+            WHERE m.anon_id = ? ORDER BY m.timestamp DESC LIMIT ? OFFSET ?""",
+            [anon_id, per_page, offset])
+        uid_row = self._fetchone("SELECT user_id FROM users WHERE id = ?", [anon_id])
+        total = self._fetchval("SELECT COUNT(*) FROM messages WHERE anon_id = ?", [anon_id])
+        total_pages = max(1, (total + per_page - 1) // per_page)
+        return rows, total_pages, uid_row["user_id"] if uid_row else None
+
     def get_stats(self) -> dict:
         total = self._fetchval("SELECT COUNT(*) FROM users WHERE is_deleted != 1")
         banned = self._fetchval("SELECT COUNT(*) FROM users WHERE is_banned = 1 AND is_deleted != 1")

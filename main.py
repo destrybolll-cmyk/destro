@@ -1031,7 +1031,8 @@ async def cmd_history(message: Message):
             pass
     rows = db.get_messages_since(minutes)
     if not rows:
-        await message.answer(f"\U0001f4ad За последние <b>{minutes}</b> мин сообщений нет.")
+        await message.answer(f"\U0001f4ad За последние <b>{minutes}</b> мин сообщений нет.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="\U0001f4dc Вся история", callback_data="history_all:1")]]))
         return
     lines = [f"\U0001f4dc <b>Сообщения за последние {minutes} мин:</b>\n"]
     current_id = None
@@ -1049,7 +1050,10 @@ async def cmd_history(message: Message):
     text = "\n".join(lines)
     if len(text) > 4000:
         text = text[:4000] + "\n\n<i>...</i>"
-    await message.answer(text)
+    history_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="\U0001f4dc Вся история", callback_data="history_all:1")]
+    ])
+    await message.answer(text, reply_markup=history_kb)
 
 
 # ─────────────────────────── Callback queries ──────────────────────────
@@ -1783,6 +1787,7 @@ async def _handle_callback(callback: CallbackQuery):
                 kb.button(text="\U0001f6ab Заблокировать", callback_data=f"ban:{anon_id}")
             kb.button(text="\U0001f5d1 Удалить", callback_data=f"del_ask:{anon_id}")
             kb.button(text="\U0001f3ae Играть", callback_data=f"ttt_challenge:{anon_id}")
+            kb.button(text="\U0001f4dc Диалог", callback_data=f"dialog:{anon_id}:1")
         kb.adjust(1)
         await callback.message.answer(text, reply_markup=kb.as_markup())
         return
@@ -1930,6 +1935,72 @@ async def _handle_callback(callback: CallbackQuery):
             await callback.message.delete()
         except Exception:
             pass
+        return
+
+    elif action == "dialog":
+        page = int(parts[2]) if len(parts) > 2 else 1
+        uid = target_user_id  # from admin section
+        msgs, total_pages, _ = db.get_user_messages(anon_id, page)
+        if not msgs:
+            await callback.message.answer("\U0001f4dc <b>Диалог пуст.</b>")
+            return
+        name = esc(msgs[0]["first_name"] or f"#{anon_id}")
+        lines = [f"\U0001f4dc <b>Диалог с {name}</b> (стр. {page}/{total_pages}):\n"]
+        for m in msgs:
+            ts = local_time(m["timestamp"])
+            icon = "\u2709\ufe0f" if m["direction"] == "admin_to_user" else "\U0001f4e9"
+            who = f"{ADMIN_NAME}" if m["direction"] == "admin_to_user" else name
+            lines.append(f"{icon} <b>{who}</b> ({ts})")
+            lines.append(f"  {esc(m['text'][:200])}")
+            lines.append("")
+        text = "\n".join(lines)
+        if len(text) > 4000:
+            text = text[:4000] + "\n\n..."
+        kb = None
+        if total_pages > 1:
+            nav = []
+            if page > 1:
+                nav.append(InlineKeyboardButton(text="\u2b05\ufe0f", callback_data=f"dialog:{anon_id}:{page - 1}"))
+            nav.append(InlineKeyboardButton(text=f"\U0001f4c5 {page}/{total_pages}", callback_data="none"))
+            if page < total_pages:
+                nav.append(InlineKeyboardButton(text="\u27a1\ufe0f", callback_data=f"dialog:{anon_id}:{page + 1}"))
+            kb = InlineKeyboardMarkup(inline_keyboard=[nav])
+        await callback.message.answer(text, reply_markup=kb)
+        return
+
+    elif action == "history_all":
+        page = 1
+        if len(parts) > 1:
+            try: page = int(parts[1])
+            except: pass
+        msgs, total_pages = db.get_all_messages(page)
+        if not msgs:
+            await callback.message.answer("\U0001f4dc <b>История сообщений пуста.</b>")
+            return
+        lines = [f"\U0001f4dc <b>Вся история сообщений</b> (стр. {page}/{total_pages}):\n"]
+        current_id = None
+        for m in msgs:
+            if m["anon_id"] != current_id:
+                current_id = m["anon_id"]
+                name = esc(m["first_name"] or f"#{current_id}")
+                username = f" @{esc(m['username'])}" if m["username"] else ""
+                lines.append(f"\n👤 #{current_id} \u2014 {name}{username}")
+            ts = local_time(m["timestamp"])
+            icon = "\u2709\ufe0f" if m["direction"] == "admin_to_user" else "\U0001f4e9"
+            lines.append(f"  {icon} ({ts}) {esc(m['text'][:100])}")
+        text = "\n".join(lines)
+        if len(text) > 4000:
+            text = text[:4000] + "\n\n..."
+        kb = None
+        if total_pages > 1:
+            nav = []
+            if page > 1:
+                nav.append(InlineKeyboardButton(text="\u2b05\ufe0f", callback_data=f"history_all:{page - 1}"))
+            nav.append(InlineKeyboardButton(text=f"\U0001f4c5 {page}/{total_pages}", callback_data="none"))
+            if page < total_pages:
+                nav.append(InlineKeyboardButton(text="\u27a1\ufe0f", callback_data=f"history_all:{page + 1}"))
+            kb = InlineKeyboardMarkup(inline_keyboard=[nav])
+        await callback.message.answer(text, reply_markup=kb)
         return
 
 
