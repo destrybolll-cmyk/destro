@@ -2176,12 +2176,21 @@ async def _handle_user_message(message: Message):
 
     if db.is_banned(user_id):
         ban_anon = db.get_anon_id_by_user_id(user_id)
+        ban_user_data = db.get_user(user_id)
+        ban_reason = ""
+        if ban_user_data:
+            try:
+                br = ban_user_data["ban_reason"]
+                if br:
+                    ban_reason = f"\n\n\u2139\ufe0f Причина: {esc(str(br)[:200])}"
+            except:
+                pass
         appeal_kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="✅ Подать апелляцию", callback_data=f"appeal:{ban_anon}"),
              InlineKeyboardButton(text="❌ Нет", callback_data="none")]
         ])
         await message.answer(
-            "\U0001f6ab <b>Вы заблокированы и не можете писать.</b>\n\n"
+            f"\U0001f6ab <b>Вы заблокированы и не можете писать.</b>{ban_reason}\n\n"
             "Хотите подать апелляцию?",
             reply_markup=appeal_kb,
         )
