@@ -2013,11 +2013,13 @@ async def _handle_callback(callback: CallbackQuery):
             return
         filter_label = " (сегодня)" if date_filter == "today" else " (вчера)" if date_filter == "yesterday" else f" ({date_filter})" if date_filter else ""
         lines = [f"\U0001f4dc <b>Диалог с {name}</b>{filter_label} (стр. {page}/{total_pages}):\n"]
-        for m in msgs:
+        num_start = (len(msgs) + 1)  # We'll use reversed numbering
+        for i, m in enumerate(msgs):
+            num = (page - 1) * 20 + i + 1
             ts = local_time(m["timestamp"])
             icon = "\u2709\ufe0f" if m["direction"] == "admin_to_user" else "\U0001f4e9"
             who = f"{ADMIN_NAME}" if m["direction"] == "admin_to_user" else name
-            lines.append(f"{icon} <b>{who}</b> ({ts})")
+            lines.append(f"<b>{num}.</b> {icon} <b>{who}</b> ({ts})")
             lines.append(f"  {esc(m['text'][:200])}")
             lines.append("")
         text = "\n".join(lines)
@@ -2388,11 +2390,12 @@ async def _handle_user_message(message: Message):
                     await message.answer(f"\U0001f4dc <b>Диалог с {name}</b>\n\nНет сообщений за {date_str}.")
                     return
                 lines = [f"\U0001f4dc <b>Диалог с {name}</b> ({date_str}) стр. 1/{total_pages}:\n"]
-                for m in msgs:
+                for i, m in enumerate(msgs):
+                    num = i + 1
                     ts = local_time(m["timestamp"])
                     icon = "\u2709\ufe0f" if m["direction"] == "admin_to_user" else "\U0001f4e9"
                     who = f"{ADMIN_NAME}" if m["direction"] == "admin_to_user" else name
-                    lines.append(f"{icon} <b>{who}</b> ({ts})")
+                    lines.append(f"<b>{num}.</b> {icon} <b>{who}</b> ({ts})")
                     lines.append(f"  {esc(m['text'][:200])}")
                     lines.append("")
                 text = "\n".join(lines)
