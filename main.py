@@ -1830,6 +1830,11 @@ async def _handle_callback(callback: CallbackQuery):
     else:
         anon_id = None
         target_user_id = None
+        # Debug: log history/pgn callback
+        try:
+            await bot.send_message(ADMIN_ID, f"\U0001f4ad <b>Callback:</b> <code>{esc(callback.data)}</code>")
+        except:
+            pass
 
     if action == "reply":
         admin_pending_reply = anon_id
