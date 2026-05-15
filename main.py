@@ -2854,8 +2854,8 @@ async def handle_http(reader, writer):
     path = request.split(b" ")[1] if b" " in request and len(request.split(b" ")) > 1 else b"/"
     resp_headers = "HTTP/1.1 200 OK\r\nConnection: close\r\n"
     if path in (b"/health", b"/"):
-        body = b"OK"
-        resp_headers += "Content-Type: text/plain\r\nContent-Length: 2\r\n"
+        body = b"OK_VER2"
+        resp_headers += "Content-Type: text/plain\r\nContent-Length: 7\r\n"
     elif b"game" in path:
         try:
             with open(GAME_HTML_PATH, "rb") as f:
