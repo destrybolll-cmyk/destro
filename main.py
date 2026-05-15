@@ -1021,12 +1021,15 @@ async def cmd_history(message: Message):
             current_id = r["anon_id"]
             name = esc(r["first_name"] or f"#{current_id}")
             username = f" @{esc(r['username'])}" if r["username"] else ""
-            time = r["timestamp"][11:16] if r["timestamp"] else ""
-            lines.append(f"\n👤 #{current_id} \u2014 {name}{username} ({time}):")
-        lines.append(f'  "{esc(r["text"] or "")}"')
+            lines.append(f"\n👤 #{current_id} \u2014 {name}{username}:")
+        time = r["timestamp"][:19] if r["timestamp"] else "???"
+        direction = r.get("direction", "user_to_admin")
+        icon = "\u2709\ufe0f" if direction == "admin_to_user" else "\U0001f4e9"
+        label = f"({time})"  # e.g., (2026-05-14 12:30:45)
+        lines.append(f'  {icon} {label} "{esc(r["text"] or "")}"')
     text = "\n".join(lines)
     if len(text) > 4000:
-        text = text[:4000] + "\n\n<i>...сообщение обрезано</i>"
+        text = text[:4000] + "\n\n<i>...</i>"
     await message.answer(text)
 
 
