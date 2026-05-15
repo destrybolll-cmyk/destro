@@ -293,7 +293,7 @@ class Database:
         rows = self._fetchall(
             """SELECT m.*, u.first_name, u.username FROM messages m
             LEFT JOIN users u ON m.user_id = u.user_id
-            ORDER BY m.timestamp DESC LIMIT ? OFFSET ?""", [per_page, offset])
+            ORDER BY m.timestamp ASC LIMIT ? OFFSET ?""", [per_page, offset])
         total = self._fetchval("SELECT COUNT(*) FROM messages")
         total_pages = max(1, (total + per_page - 1) // per_page)
         return rows, total_pages
