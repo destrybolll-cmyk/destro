@@ -40,7 +40,8 @@ admin_commenting_idea: int | None = None
 ban_user_step: int | None = None
 admin_writing_diary: bool = False
 diary_editing: int | None = None
-dialog_date_entry: int | None = None  # anon_id when admin is entering a date for dialog  # entry_id being edited  # anon_id of user being banned (awaiting reason)
+dialog_date_entry: int | None = None
+history_date_entry: bool = False  # when True, next text message is a date for history filter
 
 
 async def delete_waiting(target_user_id: int):
@@ -1818,7 +1819,7 @@ async def _handle_callback(callback: CallbackQuery):
         return
 
     # history_all, pgn, pgn_del use page number, not anon_id
-    if action not in ("history_all", "pgn", "pgn_del"):
+    if action not in ("history_all", "history_date_prompt", "pgn", "pgn_del"):
         anon_id = int(parts[1])
         target_user_id = db.get_user_id_by_anon(anon_id)
         if target_user_id is None:
@@ -2096,17 +2097,22 @@ async def _handle_callback(callback: CallbackQuery):
 
     elif action == "history_all":
         page = 1
+        date_filter = None
         if len(parts) > 1:
             try: page = int(parts[1])
             except: pass
-        msgs, total_pages = db.get_all_messages(page)
+        if len(parts) > 2:
+            date_filter = parts[2]
+        msgs, total_pages = db.get_all_messages(page, date_filter=date_filter)
         chat_id = callback.message.chat.id
         try: await callback.message.delete()
         except: pass
         if not msgs:
-            await bot.send_message(chat_id, "\U0001f4dc <b>История сообщений пуста.</b>")
+            label = " за сегодня" if date_filter == "today" else " за вчера" if date_filter == "yesterday" else f" за {date_filter}" if date_filter else ""
+            await bot.send_message(chat_id, f"\U0001f4dc <b>История сообщений пуста{label}.</b>")
             return
-        lines = [f"\U0001f4dc <b>Вся история сообщений</b> (стр. {page}/{total_pages}):\n"]
+        filter_label = " (сегодня)" if date_filter == "today" else " (вчера)" if date_filter == "yesterday" else f" ({date_filter})" if date_filter else ""
+        lines = [f"\U0001f4dc <b>Вся история сообщений</b>{filter_label} (стр. {page}/{total_pages}):\n"]
         current_id = None
         num = (page - 1) * 15 + 1
         for m in msgs:
@@ -2122,16 +2128,35 @@ async def _handle_callback(callback: CallbackQuery):
         text = "\n".join(lines)
         if len(text) > 4000:
             text = text[:4000] + "\n\n..."
-        kb = None
+        kb_rows = []
         if total_pages > 1:
             nav = []
             if page > 1:
-                nav.append(InlineKeyboardButton(text="\u2b05\ufe0f", callback_data=f"history_all:{page - 1}"))
+                nav.append(InlineKeyboardButton(text="\u2b05\ufe0f", callback_data=f"history_all:{page - 1}:{date_filter}" if date_filter else f"history_all:{page - 1}"))
             nav.append(InlineKeyboardButton(text=f"\U0001f4c5 {page}/{total_pages}", callback_data="none"))
             if page < total_pages:
-                nav.append(InlineKeyboardButton(text="\u27a1\ufe0f", callback_data=f"history_all:{page + 1}"))
-            kb = InlineKeyboardMarkup(inline_keyboard=[nav])
+                nav.append(InlineKeyboardButton(text="\u27a1\ufe0f", callback_data=f"history_all:{page + 1}:{date_filter}" if date_filter else f"history_all:{page + 1}"))
+            kb_rows.append(nav)
+        kb_rows.append([
+            InlineKeyboardButton(text="\U0001f4c5 Сегодня", callback_data="history_all:1:today"),
+            InlineKeyboardButton(text="\U0001f4c5 Вчера", callback_data="history_all:1:yesterday"),
+        ])
+        kb_rows.append([InlineKeyboardButton(text="\U0001f4c5 Дата", callback_data="history_date_prompt")])
+        kb = InlineKeyboardMarkup(inline_keyboard=kb_rows) if kb_rows else None
         await bot.send_message(chat_id, text, reply_markup=kb)
+        return
+
+    elif action == "history_date_prompt":
+        history_date_entry = True
+        await callback.answer()
+        try: await callback.message.delete()
+        except: pass
+        await bot.send_message(
+            callback.message.chat.id,
+            "\U0001f4c5 <b>Введите дату</b> в формате ГГГГ-ММ-ДД\n\n"
+            "Например: 2026-05-14\n"
+            "/cancel — отменить"
+        )
         return
 
 
@@ -2451,6 +2476,55 @@ async def _handle_user_message(message: Message):
                     if 1 < total_pages:
                         nav.append(InlineKeyboardButton(text="\u27a1\ufe0f", callback_data=f"dialog:{anon_id}:2:{date_str}"))
                     kb = InlineKeyboardMarkup(inline_keyboard=[nav])
+                await bot.send_message(chat_id, text, reply_markup=kb)
+            else:
+                await message.answer("❌ Неверный формат. Используйте ГГГГ-ММ-ДД (например 2026-05-14)")
+            return
+
+        # ── History date entry ──
+        if history_date_entry:
+            if message.text == BTN_CANCEL or message.text == "/cancel":
+                history_date_entry = False
+                await cmd_cancel(message)
+                return
+            date_str = (message.text or "").strip()
+            import re
+            if re.match(r"^\d{4}-\d{2}-\d{2}$", date_str):
+                history_date_entry = False
+                try: await message.delete()
+                except: pass
+                chat_id = message.chat.id
+                msgs, total_pages = db.get_all_messages(1, date_filter=date_str)
+                if not msgs:
+                    await bot.send_message(chat_id, f"\U0001f4dc <b>История сообщений пуста за {date_str}.</b>")
+                    return
+                lines = [f"\U0001f4dc <b>Вся история сообщений</b> ({date_str}) стр. 1/{total_pages}:\n"]
+                current_id = None
+                num = 1
+                for m in msgs:
+                    if m["anon_id"] != current_id:
+                        current_id = m["anon_id"]
+                        name = esc(m["first_name"] or f"#{current_id}")
+                        username = f" @{esc(m['username'])}" if m["username"] else ""
+                        lines.append(f"\n👤 #{current_id} \u2014 {name}{username}")
+                    ts = local_time(m["timestamp"])
+                    icon = "\u2709\ufe0f" if m["direction"] == "admin_to_user" else "\U0001f4e9"
+                    lines.append(f"  <b>{num}.</b> {icon} ({ts}) {esc(m['text'][:100])}")
+                    num += 1
+                text = "\n".join(lines)
+                if len(text) > 4000: text = text[:4000] + "\n\n..."
+                kb_rows = []
+                if total_pages > 1:
+                    nav = []
+                    if 1 < total_pages:
+                        nav.append(InlineKeyboardButton(text="\u27a1\ufe0f", callback_data=f"history_all:2:{date_str}"))
+                    kb_rows.append(nav)
+                kb_rows.append([
+                    InlineKeyboardButton(text="\U0001f4c5 Сегодня", callback_data="history_all:1:today"),
+                    InlineKeyboardButton(text="\U0001f4c5 Вчера", callback_data="history_all:1:yesterday"),
+                ])
+                kb_rows.append([InlineKeyboardButton(text="\U0001f4c5 Дата", callback_data="history_date_prompt")])
+                kb = InlineKeyboardMarkup(inline_keyboard=kb_rows) if kb_rows else None
                 await bot.send_message(chat_id, text, reply_markup=kb)
             else:
                 await message.answer("❌ Неверный формат. Используйте ГГГГ-ММ-ДД (например 2026-05-14)")
