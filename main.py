@@ -53,7 +53,39 @@ async def delete_waiting(target_user_id: int):
 
 
 def get_message_text(message: Message) -> str:
-    return message.text or message.caption or ""
+    text = message.text or message.caption or ""
+    if text:
+        return text
+    return get_content_type_plain(message) or ""
+
+def get_content_type_plain(message: Message) -> str | None:
+    if message.sticker:
+        return "[Стикер]"
+    if message.photo:
+        return "[Фото]"
+    if message.video:
+        return "[Видео]"
+    if message.animation:
+        return "[GIF]"
+    if message.voice:
+        return "[Голосовое]"
+    if message.video_note:
+        return "[Видеосообщение]"
+    if message.audio:
+        return "[Аудио]"
+    if message.document:
+        return "[Документ]"
+    if message.location:
+        return "[Геопозиция]"
+    if message.contact:
+        return "[Контакт]"
+    if message.poll:
+        return "[Опрос]"
+    if message.dice:
+        return "[Dice]"
+    if message.venue:
+        return "[Место]"
+    return None
 
 
 def get_content_type_label(message: Message) -> str | None:
