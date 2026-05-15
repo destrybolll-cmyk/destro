@@ -2878,14 +2878,6 @@ async def run_http_server():
     await asyncio.Event().wait()
 
 
-async def run_http_server():
-    health_port = int(os.getenv("PORT", 8080))
-    server = await asyncio.start_server(handle_http, host="0.0.0.0", port=health_port)
-    logging.info(f"\U0001fa7a HTTP server on :{health_port}")
-    async with server:
-        await server.serve_forever()
-
-
 async def daily_wisdom_task():
     while True:
         now = datetime.now()
