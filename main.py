@@ -8,9 +8,6 @@ import secrets
 import time
 from datetime import datetime
 
-import aiohttp
-from aiohttp import web as aiohttp_web
-
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -2848,25 +2845,50 @@ async def _handle_user_message(message: Message):
     waiting_messages[user_id] = wait_msg.message_id
 
 
-# ────────── HTTP server (aiohttp) ─────────────────────────────
+# ────────── HTTP server (health + game) ──────────────────────────
 
 GAME_HTML_PATH = os.path.join(os.path.dirname(__file__), "public", "game.html")
 
-async def handle_http(request):
-    path = request.url.path
-    if path == "/health":
-        return aiohttp_web.Response(text="OK")
-    # Debug: return the path we received
-    return aiohttp_web.Response(text=f"path: {path}", content_type="text/plain")
+async def handle_http(reader, writer):
+    request = await reader.read(8192)
+    path = request.split(b" ")[1] if b" " in request and len(request.split(b" ")) > 1 else b"/"
+    if path in (b"/health", b"/"):
+        resp = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK"
+    elif b"game" in path:
+        try:
+            with open(GAME_HTML_PATH, "rb") as f:
+                data = f.read()
+            resp = (
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: text/html; charset=utf-8\r\n"
+                f"Content-Length: {len(data)}\r\n"
+                "Connection: close\r\n"
+                "\r\n"
+            ).encode() + data
+            writer.write(resp)
+            await writer.drain()
+            await writer.wait_closed()
+            return
+        except FileNotFoundError:
+            resp = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    else:
+        body = f"Debug: path={path.decode()} request={request[:200]}".encode()
+        resp = (
+            "HTTP/1.1 200 OK\r\n"
+            f"Content-Length: {len(body)}\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+        ).encode() + body
+    writer.write(resp.encode() if isinstance(resp, str) else resp)
+    await writer.drain()
+    writer.close()
 
 async def run_http_server():
-    app = aiohttp_web.Application()
-    app.router.add_get("/health", handle_http)
-    app.router.add_get("/game", handle_http)
-    app.router.add_get("/game.html", handle_http)
-    # Catch-all for debugging
-    app.router.add_get("/{tail:.*}", handle_http)
     health_port = int(os.getenv("PORT", 8080))
+    server = await asyncio.start_server(handle_http, host="0.0.0.0", port=health_port)
+    logging.info(f"\U0001fa7a HTTP server on :{health_port}")
+    async with server:
+        await server.serve_forever()
     runner = aiohttp_web.AppRunner(app)
     await runner.setup()
     site = aiohttp_web.TCPSite(runner, "0.0.0.0", health_port)
