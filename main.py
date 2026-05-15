@@ -2889,11 +2889,6 @@ async def run_http_server():
     logging.info(f"\U0001fa7a HTTP server on :{health_port}")
     async with server:
         await server.serve_forever()
-    runner = aiohttp_web.AppRunner(app)
-    await runner.setup()
-    site = aiohttp_web.TCPSite(runner, "0.0.0.0", health_port)
-    await site.start()
-    logging.info(f"\U0001fa7a HTTP server on :{health_port}")
     await asyncio.Event().wait()
 
 
