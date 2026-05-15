@@ -39,7 +39,8 @@ user_telling_idea: set[int] = set()
 admin_commenting_idea: int | None = None
 ban_user_step: int | None = None
 admin_writing_diary: bool = False
-diary_editing: int | None = None  # entry_id being edited  # anon_id of user being banned (awaiting reason)
+diary_editing: int | None = None
+dialog_date_entry: int | None = None  # anon_id when admin is entering a date for dialog  # entry_id being edited  # anon_id of user being banned (awaiting reason)
 
 
 async def delete_waiting(target_user_id: int):
@@ -692,7 +693,7 @@ async def cmd_help(message: Message):
 async def cmd_cancel(message: Message):
     if not is_admin(message.from_user.id):
         return
-    global admin_pending_reply, write_flow_step, write_flow_anon_id, add_user_step, rename_anon_id, admin_commenting_idea, ban_user_step, admin_writing_diary, diary_editing
+    global admin_pending_reply, write_flow_step, write_flow_anon_id, add_user_step, rename_anon_id, admin_commenting_idea, ban_user_step, admin_writing_diary, diary_editing, dialog_date_entry
     admin_pending_reply = None
     write_flow_step = None
     write_flow_anon_id = None
@@ -702,6 +703,7 @@ async def cmd_cancel(message: Message):
     ban_user_step = None
     admin_writing_diary = False
     diary_editing = None
+    dialog_date_entry = None
     # Cancel any pending TTT challenge
     pending = db.get_player_game(ADMIN_ANON_ID, statuses=("pending",))
     if pending:
@@ -1078,7 +1080,7 @@ async def handle_callback(callback: CallbackQuery):
 
 
 async def _handle_callback(callback: CallbackQuery):
-    global admin_pending_reply, write_flow_step, write_flow_anon_id, rename_anon_id, admin_commenting_idea, ban_user_step, admin_writing_diary, diary_editing
+    global admin_pending_reply, write_flow_step, write_flow_anon_id, rename_anon_id, admin_commenting_idea, ban_user_step, admin_writing_diary, diary_editing, dialog_date_entry
 
     parts = callback.data.split(":")
     action = parts[0]
@@ -1939,14 +1941,17 @@ async def _handle_callback(callback: CallbackQuery):
 
     elif action == "dialog":
         page = int(parts[2]) if len(parts) > 2 else 1
-        uid = target_user_id
-        msgs, total_pages, _ = db.get_user_messages(anon_id, page)
+        date_filter = parts[3] if len(parts) > 3 else None
+        msgs, total_pages, _ = db.get_user_messages(anon_id, page, date_filter=date_filter)
+        name = esc(db.get_user_by_anon(anon_id)["first_name"] or f"#{anon_id}")
         if not msgs:
-            try: await callback.message.edit_text("\U0001f4dc <b>Диалог пуст.</b>")
-            except: await callback.message.answer("\U0001f4dc <b>Диалог пуст.</b>")
+            label = "за сегодня" if date_filter == "today" else "за вчера" if date_filter == "yesterday" else f"за {date_filter}" if date_filter else ""
+            empty_text = f"\U0001f4dc <b>Диалог с {name}</b>\n\nНет сообщений {label}." if label else f"\U0001f4dc <b>Диалог с {name}</b>\n\nНет сообщений."
+            try: await callback.message.edit_text(empty_text)
+            except: await callback.message.answer(empty_text)
             return
-        name = esc(msgs[0]["first_name"] or f"#{anon_id}")
-        lines = [f"\U0001f4dc <b>Диалог с {name}</b> (стр. {page}/{total_pages}):\n"]
+        filter_label = " (сегодня)" if date_filter == "today" else " (вчера)" if date_filter == "yesterday" else f" ({date_filter})" if date_filter else ""
+        lines = [f"\U0001f4dc <b>Диалог с {name}</b>{filter_label} (стр. {page}/{total_pages}):\n"]
         for m in msgs:
             ts = local_time(m["timestamp"])
             icon = "\u2709\ufe0f" if m["direction"] == "admin_to_user" else "\U0001f4e9"
@@ -1957,17 +1962,34 @@ async def _handle_callback(callback: CallbackQuery):
         text = "\n".join(lines)
         if len(text) > 4000:
             text = text[:4000] + "\n\n..."
-        kb = None
+        kb_rows = []
+        nav = []
         if total_pages > 1:
-            nav = []
             if page > 1:
-                nav.append(InlineKeyboardButton(text="\u2b05\ufe0f", callback_data=f"dialog:{anon_id}:{page - 1}"))
+                nav.append(InlineKeyboardButton(text="\u2b05\ufe0f", callback_data=f"dialog:{anon_id}:{page - 1}:{date_filter}" if date_filter else f"dialog:{anon_id}:{page - 1}"))
             nav.append(InlineKeyboardButton(text=f"\U0001f4c5 {page}/{total_pages}", callback_data="none"))
             if page < total_pages:
-                nav.append(InlineKeyboardButton(text="\u27a1\ufe0f", callback_data=f"dialog:{anon_id}:{page + 1}"))
-            kb = InlineKeyboardMarkup(inline_keyboard=[nav])
+                nav.append(InlineKeyboardButton(text="\u27a1\ufe0f", callback_data=f"dialog:{anon_id}:{page + 1}:{date_filter}" if date_filter else f"dialog:{anon_id}:{page + 1}"))
+        if nav:
+            kb_rows.append(nav)
+        kb_rows.append([
+            InlineKeyboardButton(text="\U0001f4c5 Сегодня", callback_data=f"dialog:{anon_id}:1:today"),
+            InlineKeyboardButton(text="\U0001f4c5 Вчера", callback_data=f"dialog:{anon_id}:1:yesterday"),
+        ])
+        kb_rows.append([InlineKeyboardButton(text="\U0001f4c5 Дата", callback_data=f"dialog_date_prompt:{anon_id}")])
+        kb = InlineKeyboardMarkup(inline_keyboard=kb_rows)
         try: await callback.message.edit_text(text, reply_markup=kb)
         except: await callback.message.answer(text, reply_markup=kb)
+        return
+
+    elif action == "dialog_date_prompt":
+        dialog_date_entry = anon_id
+        await callback.answer()
+        await callback.message.answer(
+            "\U0001f4c5 <b>Введите дату</b> в формате ГГГГ-ММ-ДД\n\n"
+            "Например: 2026-05-14\n"
+            "/cancel — отменить"
+        )
         return
 
     elif action == "history_all":
@@ -2073,7 +2095,7 @@ async def handle_user_message(message: Message):
 
 
 async def _handle_user_message(message: Message):
-    global admin_pending_reply, write_flow_step, write_flow_anon_id, add_user_step, rename_anon_id, admin_commenting_idea, ban_user_step, admin_writing_diary, diary_editing
+    global admin_pending_reply, write_flow_step, write_flow_anon_id, add_user_step, rename_anon_id, admin_commenting_idea, ban_user_step, admin_writing_diary, diary_editing, dialog_date_entry
     user_id = message.from_user.id
 
     if is_admin(user_id):
@@ -2286,6 +2308,43 @@ async def _handle_user_message(message: Message):
                 await message.answer(f"✅ Запись #{entry_id} обновлена!")
             else:
                 await message.answer("❌ Текст не может быть пустым.")
+            return
+
+        # ── Dialog date entry ──
+        if dialog_date_entry is not None:
+            if message.text == BTN_CANCEL or message.text == "/cancel":
+                dialog_date_entry = None
+                await cmd_cancel(message)
+                return
+            date_str = (message.text or "").strip()
+            import re
+            if re.match(r"^\d{4}-\d{2}-\d{2}$", date_str):
+                anon_id = dialog_date_entry
+                dialog_date_entry = None
+                msgs, total_pages, _ = db.get_user_messages(anon_id, 1, date_filter=date_str)
+                name = esc(db.get_user_by_anon(anon_id)["first_name"] or f"#{anon_id}")
+                if not msgs:
+                    await message.answer(f"\U0001f4dc <b>Диалог с {name}</b>\n\nНет сообщений за {date_str}.")
+                    return
+                lines = [f"\U0001f4dc <b>Диалог с {name}</b> ({date_str}) стр. 1/{total_pages}:\n"]
+                for m in msgs:
+                    ts = local_time(m["timestamp"])
+                    icon = "\u2709\ufe0f" if m["direction"] == "admin_to_user" else "\U0001f4e9"
+                    who = f"{ADMIN_NAME}" if m["direction"] == "admin_to_user" else name
+                    lines.append(f"{icon} <b>{who}</b> ({ts})")
+                    lines.append(f"  {esc(m['text'][:200])}")
+                    lines.append("")
+                text = "\n".join(lines)
+                if len(text) > 4000: text = text[:4000] + "\n\n..."
+                kb = None
+                if total_pages > 1:
+                    nav = []
+                    if 1 < total_pages:
+                        nav.append(InlineKeyboardButton(text="\u27a1\ufe0f", callback_data=f"dialog:{anon_id}:2:{date_str}"))
+                    kb = InlineKeyboardMarkup(inline_keyboard=[nav])
+                await message.answer(text, reply_markup=kb)
+            else:
+                await message.answer("❌ Неверный формат. Используйте ГГГГ-ММ-ДД (например 2026-05-14)")
             return
 
         if admin_writing_diary:

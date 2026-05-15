@@ -298,15 +298,24 @@ class Database:
         total_pages = max(1, (total + per_page - 1) // per_page)
         return rows, total_pages
 
-    def get_user_messages(self, anon_id: int, page: int = 1, per_page: int = 20):
+    def get_user_messages(self, anon_id: int, page: int = 1, per_page: int = 20, date_filter: str = None):
         offset = (page - 1) * per_page
+        where = "m.anon_id = ?"
+        params = [anon_id]
+        if date_filter == "today":
+            where += " AND date(m.timestamp) = date('now')"
+        elif date_filter == "yesterday":
+            where += " AND date(m.timestamp) = date('now', '-1 day')"
+        elif date_filter:
+            where += " AND date(m.timestamp) = date(?)"
+            params.append(date_filter)
         rows = self._fetchall(
-            """SELECT m.*, u.first_name, u.username FROM messages m
+            f"""SELECT m.*, u.first_name, u.username FROM messages m
             LEFT JOIN users u ON m.user_id = u.user_id
-            WHERE m.anon_id = ? ORDER BY m.timestamp DESC LIMIT ? OFFSET ?""",
-            [anon_id, per_page, offset])
+            WHERE {where} ORDER BY m.timestamp DESC LIMIT ? OFFSET ?""",
+            params + [per_page, offset])
         uid_row = self._fetchone("SELECT user_id FROM users WHERE id = ?", [anon_id])
-        total = self._fetchval("SELECT COUNT(*) FROM messages WHERE anon_id = ?", [anon_id])
+        total = self._fetchval(f"SELECT COUNT(*) FROM messages WHERE {where}", params)
         total_pages = max(1, (total + per_page - 1) // per_page)
         return rows, total_pages, uid_row["user_id"] if uid_row else None
 
