@@ -8,6 +8,9 @@ import secrets
 import time
 from datetime import datetime
 
+import aiohttp
+from aiohttp import web as aiohttp_web
+
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -2845,50 +2848,36 @@ async def _handle_user_message(message: Message):
     waiting_messages[user_id] = wait_msg.message_id
 
 
-# ────────── HTTP server (health + game) ──────────────────────────
+# ────────── HTTP server (aiohttp) ─────────────────────────────
 
 GAME_HTML_PATH = os.path.join(os.path.dirname(__file__), "public", "game.html")
 
-async def handle_http(reader, writer):
-    request = await reader.read(8192)
-    req_str = request.decode("utf-8", errors="replace")
-    if b"GET /health" in request or b"GET / " in request:
-        resp = (
-            "HTTP/1.1 200 OK\r\n"
-            "Content-Type: text/plain\r\n"
-            "Content-Length: 2\r\n"
-            "Connection: close\r\n"
-            "\r\n"
-            "OK"
-        )
-    elif b"/game" in request:
+async def handle_http(request):
+    path = request.url.path
+    if path in ("/health", "/"):
+        return aiohttp_web.Response(text="OK")
+    elif path in ("/game", "/game.html"):
         try:
             with open(GAME_HTML_PATH, "rb") as f:
                 data = f.read()
-            resp = (
-                "HTTP/1.1 200 OK\r\n"
-                "Content-Type: text/html; charset=utf-8\r\n"
-                f"Content-Length: {len(data)}\r\n"
-                "Connection: close\r\n"
-                "\r\n"
-            ).encode() + data
-            writer.write(resp)
-            await writer.drain()
-            writer.close()
-            return
+            return aiohttp_web.Response(body=data, content_type="text/html; charset=utf-8")
         except FileNotFoundError:
-            resp = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-    else:
-        body = f"Unknown path, request: {req_str[:200]}".encode()
-        resp = (
-            "HTTP/1.1 404 Not Found\r\n"
-            f"Content-Length: {len(body)}\r\n"
-            "Connection: close\r\n"
-            "\r\n"
-        ).encode() + body
-    writer.write(resp)
-    await writer.drain()
-    writer.close()
+            return aiohttp_web.Response(status=404)
+    return aiohttp_web.Response(status=404)
+
+async def run_http_server():
+    app = aiohttp_web.Application()
+    app.router.add_get("/health", handle_http)
+    app.router.add_get("/", handle_http)
+    app.router.add_get("/game", handle_http)
+    app.router.add_get("/game.html", handle_http)
+    health_port = int(os.getenv("PORT", 8080))
+    runner = aiohttp_web.AppRunner(app)
+    await runner.setup()
+    site = aiohttp_web.TCPSite(runner, "0.0.0.0", health_port)
+    await site.start()
+    logging.info(f"\U0001fa7a HTTP server on :{health_port}")
+    await asyncio.Event().wait()
 
 
 async def run_http_server():
