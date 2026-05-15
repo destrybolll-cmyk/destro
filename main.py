@@ -242,7 +242,8 @@ def user_actions_keyboard(anon_id: int, is_banned: bool = False, show_ttt: bool 
         builder.button(text="\U0001f6ab Заблокировать", callback_data=f"ban:{anon_id}")
     builder.button(text="\U0001f5d1 Удалить", callback_data=f"del_ask:{anon_id}")
     if show_ttt:
-        builder.button(text="\U0001f3ae Играть", callback_data=f"ttt_challenge:{anon_id}")
+        builder.button(text="\U0001f3ae Крестики-нолики", callback_data=f"ttt_challenge:{anon_id}")
+    builder.button(text="\U0001f3d3 Пинг-Понг", callback_data=f"pong_challenge_admin:{anon_id}")
     builder.adjust(1)
     return builder
 
@@ -1125,7 +1126,7 @@ async def _handle_callback(callback: CallbackQuery):
                        "wisdom", "user_ttt", "user_idea", "idea_accept", "idea_reject", "idea_comment",
                        "diary_read", "diary_pgn", "diary_edit",
                        "diary_notify", "diary_notify_off",
-                        "pong_challenge", "none"):
+                        "pong_challenge", "pong_user_accept", "pong_user_decline", "none"):
             pass
         else:
             await callback.answer(f"❌ Только для {ADMIN_NAME}.", show_alert=True)
@@ -1182,6 +1183,41 @@ async def _handle_callback(callback: CallbackQuery):
                 await bot.send_message(ADMIN_ID, f"❌ Пользователь #{anon_id} заблокировал бота. Вызов отменён.")
             else:
                 await bot.send_message(ADMIN_ID, f"❌ Не удалось отправить вызов пользователю #{anon_id}: {esc(str(ce)[:100])}")
+        return
+
+    elif action == "pong_challenge_admin":
+        if not is_admin(callback.from_user.id):
+            await callback.answer(f"❌ Только для {ADMIN_NAME}.", show_alert=True)
+            return
+        anon_id = int(parts[1])
+        if anon_id == ADMIN_ANON_ID:
+            await callback.answer("❌ Нельзя играть с самим собой.", show_alert=True)
+            return
+        user = db.get_user_by_anon(anon_id)
+        if not user or row_get(user, "is_deleted"):
+            await callback.answer("❌ Пользователь не найден.", show_alert=True)
+            return
+        target_user_id = user["user_id"]
+        await callback.answer()
+        await bot.send_message(ADMIN_ID, f"⏳ Вызов отправлен пользователю #{anon_id}...")
+        accept_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Принять", callback_data=f"pong_user_accept:{ADMIN_ANON_ID}:{anon_id}"),
+             InlineKeyboardButton(text="❌ Отклонить", callback_data=f"pong_user_decline:{ADMIN_ANON_ID}:{anon_id}")]
+        ])
+        try:
+            await bot.send_message(
+                target_user_id,
+                f"\U0001f3d3 <b>{ADMIN_NAME} бросает тебе вызов в Пинг-Понг!</b>\n\n"
+                f"Нажми <b>✅ Принять</b> чтобы сыграть.\n"
+                f"Нажми <b>❌ Отклонить</b> чтобы отказаться.",
+                reply_markup=accept_kb,
+            )
+        except Exception as ce:
+            err_msg = str(ce).lower()
+            if "chat not found" in err_msg or "bot was blocked" in err_msg:
+                await bot.send_message(ADMIN_ID, f"❌ Пользователь #{anon_id} заблокировал бота. Вызов отменён.")
+            else:
+                await bot.send_message(ADMIN_ID, f"❌ Не удалось отправить вызов: {esc(str(ce)[:100])}")
         return
 
     elif action == "ttt_accept":
@@ -1811,6 +1847,49 @@ async def _handle_callback(callback: CallbackQuery):
             await callback.answer()
             return
         await callback.answer()
+        return
+
+    elif action == "pong_user_accept":
+        await callback.answer("✅ Принято! Создаю игру...")
+        admin_anon_id = int(parts[1])
+        user_anon_id = int(parts[2])
+        user = db.get_user_by_anon(user_anon_id)
+        if not user:
+            await callback.message.answer("❌ Ошибка: пользователь не найден.")
+            return
+        target_user_id = user["user_id"]
+        admin_user_id = ADMIN_ID
+        room_id = f"pong_{user_anon_id}_{int(time.time())}"
+        PONG_ROOMS[room_id] = {
+            "id": room_id,
+            "p1_ws": None, "p2_ws": None,
+            "p1_y": 310, "p2_y": 310,
+            "ball_x": 250, "ball_y": 350,
+            "ball_vx": 0, "ball_vy": 0,
+            "p1_score": 0, "p2_score": 0,
+            "running": False,
+            "loop_task": None,
+        }
+        user_link = f"https://cookie-anon-bot.onrender.com/game?room={room_id}&side=right"
+        admin_link = f"https://cookie-anon-bot.onrender.com/game?room={room_id}&side=left"
+        play_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="\U0001f3d3 Открыть игру", web_app=WebAppInfo(url=admin_link))]
+        ])
+        await bot.send_message(ADMIN_ID, f"\U0001f3d3 <b>Пользователь #{user_anon_id} принял вызов!</b>\n\nНажимай!", reply_markup=play_kb)
+        try:
+            await bot.send_message(target_user_id, f"\U0001f3d3 <b>Ты принял вызов!</b>\n\nИгра начинается!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="\U0001f3d3 Открыть игру", web_app=WebAppInfo(url=user_link))]
+            ]))
+        except Exception:
+            pass
+        return
+
+    elif action == "pong_user_decline":
+        await callback.answer()
+        admin_anon_id = int(parts[1])
+        user_anon_id = int(parts[2])
+        await bot.send_message(ADMIN_ID, f"\U0001f3d3 Пользователь #{user_anon_id} отклонил вызов в пинг-понг.")
+        await callback.message.answer("😔 Ты отклонил вызов.")
         return
 
     elif action == "pong_challenge":
