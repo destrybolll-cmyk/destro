@@ -1939,10 +1939,11 @@ async def _handle_callback(callback: CallbackQuery):
 
     elif action == "dialog":
         page = int(parts[2]) if len(parts) > 2 else 1
-        uid = target_user_id  # from admin section
+        uid = target_user_id
         msgs, total_pages, _ = db.get_user_messages(anon_id, page)
         if not msgs:
-            await callback.message.answer("\U0001f4dc <b>Диалог пуст.</b>")
+            try: await callback.message.edit_text("\U0001f4dc <b>Диалог пуст.</b>")
+            except: await callback.message.answer("\U0001f4dc <b>Диалог пуст.</b>")
             return
         name = esc(msgs[0]["first_name"] or f"#{anon_id}")
         lines = [f"\U0001f4dc <b>Диалог с {name}</b> (стр. {page}/{total_pages}):\n"]
@@ -1965,7 +1966,8 @@ async def _handle_callback(callback: CallbackQuery):
             if page < total_pages:
                 nav.append(InlineKeyboardButton(text="\u27a1\ufe0f", callback_data=f"dialog:{anon_id}:{page + 1}"))
             kb = InlineKeyboardMarkup(inline_keyboard=[nav])
-        await callback.message.answer(text, reply_markup=kb)
+        try: await callback.message.edit_text(text, reply_markup=kb)
+        except: await callback.message.answer(text, reply_markup=kb)
         return
 
     elif action == "history_all":
@@ -1975,7 +1977,8 @@ async def _handle_callback(callback: CallbackQuery):
             except: pass
         msgs, total_pages = db.get_all_messages(page)
         if not msgs:
-            await callback.message.answer("\U0001f4dc <b>История сообщений пуста.</b>")
+            try: await callback.message.edit_text("\U0001f4dc <b>История сообщений пуста.</b>")
+            except: await callback.message.answer("\U0001f4dc <b>История сообщений пуста.</b>")
             return
         lines = [f"\U0001f4dc <b>Вся история сообщений</b> (стр. {page}/{total_pages}):\n"]
         current_id = None
@@ -2000,7 +2003,8 @@ async def _handle_callback(callback: CallbackQuery):
             if page < total_pages:
                 nav.append(InlineKeyboardButton(text="\u27a1\ufe0f", callback_data=f"history_all:{page + 1}"))
             kb = InlineKeyboardMarkup(inline_keyboard=[nav])
-        await callback.message.answer(text, reply_markup=kb)
+        try: await callback.message.edit_text(text, reply_markup=kb)
+        except: await callback.message.answer(text, reply_markup=kb)
         return
 
 
