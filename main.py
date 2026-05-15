@@ -2094,9 +2094,33 @@ async def _handle_callback(callback: CallbackQuery):
 
     # ── Stale/removed callbacks (history_all was removed) ──
     if action in ("history_all", "history_date_prompt"):
-        await callback.answer("Этот раздел больше недоступен.", show_alert=True)
+        await callback.answer()
         try: await callback.message.delete()
         except: pass
+        # Run cmd_history logic directly
+        chat_id = callback.message.chat.id
+        minutes = 60
+        rows = db.get_messages_since(minutes)
+        if not rows:
+            await bot.send_message(chat_id, f"\U0001f4ad За последние <b>{minutes}</b> мин сообщений нет.")
+            return
+        lines = [f"\U0001f4dc <b>Сообщения за последние {minutes} мин:</b>\n"]
+        current_id = None
+        for r in rows:
+            if r["anon_id"] != current_id:
+                current_id = r["anon_id"]
+                name = esc(r["first_name"] or f"#{current_id}")
+                username = f" @{esc(r['username'])}" if r["username"] else ""
+                lines.append(f"\n👤 #{current_id} \u2014 {name}{username}:")
+            time = local_time(r["timestamp"])
+            direction = r.get("direction", "user_to_admin")
+            icon = "\u2709\ufe0f" if direction == "admin_to_user" else "\U0001f4e9"
+            label = f"({time})"
+            lines.append(f'  {icon} {label} "{esc(r["text"] or "")}"')
+        text = "\n".join(lines)
+        if len(text) > 4000:
+            text = text[:4000] + "\n\n<i>...</i>"
+        await bot.send_message(chat_id, text)
         return
 
 
