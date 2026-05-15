@@ -2851,8 +2851,7 @@ GAME_HTML_PATH = os.path.join(os.path.dirname(__file__), "public", "game.html")
 
 async def handle_http(reader, writer):
     request = await reader.read(8192)
-    path = request.split(b" ")[1] if b" " in request else b"/"
-    if path == b"/health" or path == b"/":
+    if b"GET /health" in request or b"GET / " in request:
         resp = (
             "HTTP/1.1 200 OK\r\n"
             "Content-Type: text/plain\r\n"
@@ -2861,7 +2860,7 @@ async def handle_http(reader, writer):
             "\r\n"
             "OK"
         )
-    elif path == b"/game" or path == b"/game.html":
+    elif b"GET /game" in request:
         try:
             with open(GAME_HTML_PATH, "rb") as f:
                 data = f.read()
