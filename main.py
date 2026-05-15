@@ -1823,7 +1823,9 @@ async def _handle_callback(callback: CallbackQuery):
         anon_id = int(parts[1])
         target_user_id = db.get_user_id_by_anon(anon_id)
         if target_user_id is None:
+            detail = f"callback_data: {callback.data}, parts: {parts}, action: {action}"
             await callback.answer("❌ Пользователь не найден.", show_alert=True)
+            await bot.send_message(ADMIN_ID, f"❌ Пользователь не найден.\n<code>{esc(detail)}</code>")
             return
     else:
         anon_id = None
