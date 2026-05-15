@@ -1091,6 +1091,7 @@ async def _handle_callback(callback: CallbackQuery):
                        "dice_accept", "dice_decline", "dice_rematch", "dice_my_stats", "dice_pgn",
                        "wisdom", "user_ttt", "user_idea", "idea_accept", "idea_reject", "idea_comment",
                        "diary_read", "diary_pgn", "diary_edit",
+                       "diary_notify", "diary_notify_off",
                         "none"):
             pass
         else:
@@ -1606,6 +1607,34 @@ async def _handle_callback(callback: CallbackQuery):
         )
         return
 
+    elif action == "diary_notify":
+        if is_admin(callback.from_user.id):
+            await callback.answer()
+            return
+        anon_id = int(parts[1])
+        uid = db.get_user_id_by_anon(anon_id)
+        if uid:
+            db._exec("UPDATE users SET diary_notify = 1 WHERE user_id = ?", [uid])
+        await callback.answer("✅ Уведомления включены!")
+        try: await callback.message.delete()
+        except: pass
+        await callback.message.answer("\U0001f4d6 <b>Уведомления о новых записях в дневнике включены.</b>\n\nНапиши «дневник» чтобы читать дневник.")
+        return
+
+    elif action == "diary_notify_off":
+        if is_admin(callback.from_user.id):
+            await callback.answer()
+            return
+        anon_id = int(parts[1])
+        uid = db.get_user_id_by_anon(anon_id)
+        if uid:
+            db._exec("UPDATE users SET diary_notify = 0 WHERE user_id = ?", [uid])
+        await callback.answer("✅ Уведомления выключены!")
+        try: await callback.message.delete()
+        except: pass
+        await callback.message.answer("\U0001f4d6 <b>Уведомления о новых записях в дневнике выключены.</b>\n\nНапиши «дневник» чтобы читать дневник.")
+        return
+
     elif action == "diary_write":
         if not is_admin(callback.from_user.id):
             await callback.answer()
@@ -1638,6 +1667,30 @@ async def _handle_callback(callback: CallbackQuery):
         )
         return
 
+    elif action == "diary_del_ask":
+        if not is_admin(callback.from_user.id):
+            await callback.answer()
+            return
+        entry_id = int(parts[1])
+        await callback.answer()
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"diary_del_yes:{entry_id}"),
+             InlineKeyboardButton(text="❌ Нет", callback_data="none")]
+        ])
+        await callback.message.answer(f"\U0001f5d1 <b>Точно удалить запись #{entry_id}?</b>", reply_markup=kb)
+        return
+
+    elif action == "diary_del_yes":
+        if not is_admin(callback.from_user.id):
+            await callback.answer()
+            return
+        entry_id = int(parts[1])
+        db.delete_diary_entry(entry_id)
+        await callback.answer("🗑 Запись удалена.")
+        try: await callback.message.delete()
+        except: pass
+        return
+
     elif action == "diary_read":
         page = int(parts[1])
         await callback.answer()
@@ -1664,7 +1717,11 @@ async def _handle_callback(callback: CallbackQuery):
                 nav.append(InlineKeyboardButton(text="\u27a1\ufe0f", callback_data=f"diary_pgn:{page + 1}"))
             kb_rows.append(nav)
         if is_admin(callback.from_user.id) and entries:
-            kb_rows.append([InlineKeyboardButton(text="\u270f\ufe0f Редактировать", callback_data=f"diary_edit:{entries[0]['id']}")])
+            eid = entries[0]["id"]
+            kb_rows.append([
+                InlineKeyboardButton(text="\u270f\ufe0f Редактировать", callback_data=f"diary_edit:{eid}"),
+                InlineKeyboardButton(text="\U0001f5d1 Удалить", callback_data=f"diary_del_ask:{eid}"),
+            ])
         kb = InlineKeyboardMarkup(inline_keyboard=kb_rows) if kb_rows else None
         try:
             await callback.message.edit_text(text, reply_markup=kb)
@@ -1698,7 +1755,11 @@ async def _handle_callback(callback: CallbackQuery):
                 nav.append(InlineKeyboardButton(text="\u27a1\ufe0f", callback_data=f"diary_pgn:{page + 1}"))
             kb_rows.append(nav)
         if is_admin(callback.from_user.id) and entries:
-            kb_rows.append([InlineKeyboardButton(text="\u270f\ufe0f Редактировать", callback_data=f"diary_edit:{entries[0]['id']}")])
+            eid = entries[0]["id"]
+            kb_rows.append([
+                InlineKeyboardButton(text="\u270f\ufe0f Редактировать", callback_data=f"diary_edit:{eid}"),
+                InlineKeyboardButton(text="\U0001f5d1 Удалить", callback_data=f"diary_del_ask:{eid}"),
+            ])
         kb = InlineKeyboardMarkup(inline_keyboard=kb_rows) if kb_rows else None
         await callback.message.edit_text(text, reply_markup=kb)
         return
@@ -2361,6 +2422,9 @@ async def _handle_user_message(message: Message):
                 users = db.get_all_users()
                 sent = 0
                 for u in users:
+                    notify = row_get(u, "diary_notify", 1)
+                    if not notify:
+                        continue
                     try:
                         await bot.send_message(
                             u["user_id"],
@@ -2540,6 +2604,15 @@ async def _handle_user_message(message: Message):
     user_msg_lower = user_msg_text
     if any(kw in user_msg_lower for kw in {"мудрость", "цитата", "мудрости"}):
         await message.answer(f"\U0001f4a1 <b>Мудрость дня</b>\n\n{wisdom_of_the_day(anon_id)}")
+        return
+
+    # ── Diary notify toggle ──
+    if any(kw in user_msg_lower for kw in {"уведомления", "уведомление", "notify"}):
+        dn = db._fetchone("SELECT diary_notify FROM users WHERE user_id = ?", [user_id])
+        now_on = not (dn and dn["diary_notify"])
+        db._exec("UPDATE users SET diary_notify = ? WHERE user_id = ?", [1 if now_on else 0, user_id])
+        status = "\u2705 включены" if now_on else "\u274c выключены"
+        await message.answer(f"\U0001f4d6 <b>Уведомления о новых записях в дневнике {status}.</b>\n\nНапиши «дневник» чтобы читать дневник.")
         return
 
     # ── Diary keyword detection ──
