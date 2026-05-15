@@ -3167,6 +3167,11 @@ async def handle_game(request):
     except FileNotFoundError:
         return web.Response(status=404)
 
+async def handle_api_users(request):
+    users = db.get_all_users()
+    data = [{"id": u["id"], "name": u["first_name"] or f"#{u['id']}", "username": u.get("username") or ""} for u in users if not u.get("is_deleted")]
+    return web.json_response(data)
+
 async def handle_websocket(request):
     ws = web.WebSocketResponse()
     await ws.prepare(request)
@@ -3237,6 +3242,7 @@ async def run_web_server():
     app.router.add_get("/", handle_index)
     app.router.add_get("/game", handle_game)
     app.router.add_get("/game.html", handle_game)
+    app.router.add_get("/api/users", handle_api_users)
     app.router.add_get("/ws", handle_websocket)
     web_port = int(os.getenv("PORT", 8080))
     runner = web.AppRunner(app)
