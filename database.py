@@ -406,3 +406,9 @@ class Database:
         total = self._fetchval("SELECT COUNT(*) FROM diary")
         total_pages = max(1, (total + per_page - 1) // per_page)
         return rows, total_pages
+
+    def get_diary_entry(self, entry_id: int):
+        return self._fetchone("SELECT * FROM diary WHERE id = ?", [entry_id])
+
+    def update_diary_entry(self, entry_id: int, text: str):
+        self._exec("UPDATE diary SET text = ? WHERE id = ?", [text, entry_id])

@@ -38,7 +38,8 @@ user_spam_warnings: dict[int, int] = {}
 user_telling_idea: set[int] = set()
 admin_commenting_idea: int | None = None
 ban_user_step: int | None = None
-admin_writing_diary: bool = False  # anon_id of user being banned (awaiting reason)
+admin_writing_diary: bool = False
+diary_editing: int | None = None  # entry_id being edited  # anon_id of user being banned (awaiting reason)
 
 
 async def delete_waiting(target_user_id: int):
@@ -691,7 +692,7 @@ async def cmd_help(message: Message):
 async def cmd_cancel(message: Message):
     if not is_admin(message.from_user.id):
         return
-    global admin_pending_reply, write_flow_step, write_flow_anon_id, add_user_step, rename_anon_id, admin_commenting_idea, ban_user_step, admin_writing_diary
+    global admin_pending_reply, write_flow_step, write_flow_anon_id, add_user_step, rename_anon_id, admin_commenting_idea, ban_user_step, admin_writing_diary, diary_editing
     admin_pending_reply = None
     write_flow_step = None
     write_flow_anon_id = None
@@ -700,6 +701,7 @@ async def cmd_cancel(message: Message):
     admin_commenting_idea = None
     ban_user_step = None
     admin_writing_diary = False
+    diary_editing = None
     # Cancel any pending TTT challenge
     pending = db.get_player_game(ADMIN_ANON_ID, statuses=("pending",))
     if pending:
@@ -1072,7 +1074,7 @@ async def handle_callback(callback: CallbackQuery):
 
 
 async def _handle_callback(callback: CallbackQuery):
-    global admin_pending_reply, write_flow_step, write_flow_anon_id, rename_anon_id, admin_commenting_idea, ban_user_step, admin_writing_diary
+    global admin_pending_reply, write_flow_step, write_flow_anon_id, rename_anon_id, admin_commenting_idea, ban_user_step, admin_writing_diary, diary_editing
 
     parts = callback.data.split(":")
     action = parts[0]
@@ -1082,7 +1084,7 @@ async def _handle_callback(callback: CallbackQuery):
                        "appeal", "appeal_accept", "appeal_decline",
                        "dice_accept", "dice_decline", "dice_rematch", "dice_my_stats", "dice_pgn",
                        "wisdom", "user_ttt", "user_idea", "idea_accept", "idea_reject", "idea_comment",
-                       "diary_read", "diary_pgn",
+                       "diary_read", "diary_pgn", "diary_edit",
                         "none"):
             pass
         else:
@@ -1611,6 +1613,25 @@ async def _handle_callback(callback: CallbackQuery):
         )
         return
 
+    elif action == "diary_edit":
+        if not is_admin(callback.from_user.id):
+            await callback.answer()
+            return
+        entry_id = int(parts[1])
+        entry = db.get_diary_entry(entry_id)
+        if not entry:
+            await callback.answer("❌ Запись не найдена.", show_alert=True)
+            return
+        diary_editing = entry_id
+        await callback.answer()
+        await callback.message.answer(
+            f"\U0001f4d6 <b>Редактирование записи #{entry_id}</b>\n\n"
+            f"Текущий текст:\n{esc(entry['text'][:200])}\n\n"
+            "Напишите новый текст.\n"
+            "/cancel — отменить"
+        )
+        return
+
     elif action == "diary_read":
         page = int(parts[1])
         await callback.answer()
@@ -1636,6 +1657,8 @@ async def _handle_callback(callback: CallbackQuery):
             if page < total_pages:
                 nav.append(InlineKeyboardButton(text="\u27a1\ufe0f", callback_data=f"diary_pgn:{page + 1}"))
             kb_rows.append(nav)
+        if is_admin(callback.from_user.id) and entries:
+            kb_rows.append([InlineKeyboardButton(text="\u270f\ufe0f Редактировать", callback_data=f"diary_edit:{entries[0]['id']}")])
         kb = InlineKeyboardMarkup(inline_keyboard=kb_rows) if kb_rows else None
         try:
             await callback.message.edit_text(text, reply_markup=kb)
@@ -1668,6 +1691,8 @@ async def _handle_callback(callback: CallbackQuery):
             if page < total_pages:
                 nav.append(InlineKeyboardButton(text="\u27a1\ufe0f", callback_data=f"diary_pgn:{page + 1}"))
             kb_rows.append(nav)
+        if is_admin(callback.from_user.id) and entries:
+            kb_rows.append([InlineKeyboardButton(text="\u270f\ufe0f Редактировать", callback_data=f"diary_edit:{entries[0]['id']}")])
         kb = InlineKeyboardMarkup(inline_keyboard=kb_rows) if kb_rows else None
         await callback.message.edit_text(text, reply_markup=kb)
         return
@@ -1973,7 +1998,7 @@ async def handle_user_message(message: Message):
 
 
 async def _handle_user_message(message: Message):
-    global admin_pending_reply, write_flow_step, write_flow_anon_id, add_user_step, rename_anon_id, admin_commenting_idea, ban_user_step, admin_writing_diary
+    global admin_pending_reply, write_flow_step, write_flow_anon_id, add_user_step, rename_anon_id, admin_commenting_idea, ban_user_step, admin_writing_diary, diary_editing
     user_id = message.from_user.id
 
     if is_admin(user_id):
@@ -2170,6 +2195,22 @@ async def _handle_user_message(message: Message):
                     await message.answer(f"✅ Комментарий добавлен к идее #{idea_id}.")
             else:
                 await message.answer("❌ Комментарий не может быть пустым.")
+            return
+
+        # ── Diary editing ──
+        if diary_editing is not None:
+            if message.text == BTN_CANCEL or message.text == "/cancel":
+                diary_editing = None
+                await cmd_cancel(message)
+                return
+            new_text = (message.text or "").strip()
+            if new_text:
+                entry_id = diary_editing
+                diary_editing = None
+                db.update_diary_entry(entry_id, new_text)
+                await message.answer(f"✅ Запись #{entry_id} обновлена!")
+            else:
+                await message.answer("❌ Текст не может быть пустым.")
             return
 
         if admin_writing_diary:
