@@ -1814,7 +1814,10 @@ async def _handle_callback(callback: CallbackQuery):
         return
 
     # pgn, pgn_del use page number, not anon_id
-    if action not in ("pgn", "pgn_del"):
+    if action in ("pgn", "pgn_del", "history_all", "history_date_prompt"):
+        anon_id = None
+        target_user_id = None
+    else:
         anon_id = int(parts[1])
         target_user_id = db.get_user_id_by_anon(anon_id)
         if target_user_id is None:
@@ -1822,9 +1825,6 @@ async def _handle_callback(callback: CallbackQuery):
             await callback.answer("❌ Пользователь не найден.", show_alert=True)
             await bot.send_message(ADMIN_ID, f"❌ Пользователь не найден.\n<code>{esc(detail)}</code>")
             return
-    else:
-        anon_id = None
-        target_user_id = None
 
     if action == "reply":
         admin_pending_reply = anon_id
@@ -2090,6 +2090,13 @@ async def _handle_callback(callback: CallbackQuery):
             "Например: 2026-05-14\n"
             "/cancel — отменить"
         )
+        return
+
+    # ── Stale/removed callbacks (history_all was removed) ──
+    if action in ("history_all", "history_date_prompt"):
+        await callback.answer("Этот раздел больше недоступен.", show_alert=True)
+        try: await callback.message.delete()
+        except: pass
         return
 
 
