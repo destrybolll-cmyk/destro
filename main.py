@@ -37,6 +37,7 @@ user_spam_warnings: dict[int, int] = {}
 # Ideas tracking
 user_telling_idea: set[int] = set()
 admin_commenting_idea: int | None = None
+ban_user_step: int | None = None  # anon_id of user being banned (awaiting reason)
 
 
 async def delete_waiting(target_user_id: int):
@@ -674,13 +675,14 @@ async def cmd_help(message: Message):
 async def cmd_cancel(message: Message):
     if not is_admin(message.from_user.id):
         return
-    global admin_pending_reply, write_flow_step, write_flow_anon_id, add_user_step, rename_anon_id, admin_commenting_idea
+    global admin_pending_reply, write_flow_step, write_flow_anon_id, add_user_step, rename_anon_id, admin_commenting_idea, ban_user_step
     admin_pending_reply = None
     write_flow_step = None
     write_flow_anon_id = None
     add_user_step = False
     rename_anon_id = None
     admin_commenting_idea = None
+    ban_user_step = None
     # Cancel any pending TTT challenge
     pending = db.get_player_game(ADMIN_ANON_ID, statuses=("pending",))
     if pending:
@@ -930,7 +932,10 @@ async def cmd_user(message: Message):
     if is_del:
         status = "\U0001f5d1 Удалён"
     elif u["is_banned"]:
-        status = "\U0001f6ab Заблокирован"
+        ban_reason = row_get(u, "ban_reason", "")
+        status = f"\U0001f6ab Заблокирован"
+        if ban_reason:
+            status += f" ({esc(str(ban_reason)[:100])})"
     else:
         status = "✅ Активен"
     text = (
@@ -1047,7 +1052,7 @@ async def handle_callback(callback: CallbackQuery):
 
 
 async def _handle_callback(callback: CallbackQuery):
-    global admin_pending_reply, write_flow_step, write_flow_anon_id, rename_anon_id, admin_commenting_idea
+    global admin_pending_reply, write_flow_step, write_flow_anon_id, rename_anon_id, admin_commenting_idea, ban_user_step
 
     parts = callback.data.split(":")
     action = parts[0]
@@ -1394,7 +1399,7 @@ async def _handle_callback(callback: CallbackQuery):
         anon_id = int(parts[1])
         allowed, remaining = db.check_appeal_limit(anon_id)
         if not allowed:
-            await callback.answer("❌ Лимит апелляций: 3 в час. Попробуйте позже.", show_alert=True)
+            await callback.answer("❌ Лимит апелляций: 3 в день. Попробуйте завтра.", show_alert=True)
             return
         await callback.answer()
         db.increment_appeal(anon_id)
@@ -1475,6 +1480,10 @@ async def _handle_callback(callback: CallbackQuery):
             await callback.answer()
             return
         anon_id = int(parts[1])
+        uid = db.get_user_id_by_anon(anon_id)
+        if uid and db.is_banned(uid):
+            await callback.answer("❌ Вы заблокированы и не можете кидать вызовы.", show_alert=True)
+            return
         user_game = db.get_player_game(anon_id)
         if user_game:
             await callback.answer("❌ Вы уже в игре.", show_alert=True)
@@ -1626,7 +1635,10 @@ async def _handle_callback(callback: CallbackQuery):
         if is_del:
             status = "\U0001f5d1 Удалён"
         elif u["is_banned"]:
-            status = "\U0001f6ab Заблокирован"
+            ban_reason = row_get(u, "ban_reason", "")
+            status = f"\U0001f6ab Заблокирован"
+            if ban_reason:
+                status += f" ({esc(str(ban_reason)[:100])})"
         else:
             status = "✅ Активен"
         text = (
@@ -1656,11 +1668,14 @@ async def _handle_callback(callback: CallbackQuery):
         return
 
     elif action == "ban":
-        await callback.answer("\U0001f6ab Пользователь заблокирован.")
-        db.ban_user(target_user_id)
+        ban_user_step = anon_id
+        await callback.answer()
         await delete_waiting(target_user_id)
-        new_kb = user_actions_keyboard(anon_id, is_banned=True).as_markup()
-        await callback.message.edit_reply_markup(reply_markup=new_kb)
+        await callback.message.answer(
+            f"✏️ <b>Напишите причину блокировки</b> для пользователя #<b>{anon_id}</b>.\n"
+            "Пользователь увидит эту причину.\n"
+            "/cancel — отменить"
+        )
         return
 
     elif action == "unban":
@@ -1861,7 +1876,7 @@ async def handle_user_message(message: Message):
 
 
 async def _handle_user_message(message: Message):
-    global admin_pending_reply, write_flow_step, write_flow_anon_id, add_user_step, rename_anon_id, admin_commenting_idea
+    global admin_pending_reply, write_flow_step, write_flow_anon_id, add_user_step, rename_anon_id, admin_commenting_idea, ban_user_step
     user_id = message.from_user.id
 
     if is_admin(user_id):
@@ -2000,6 +2015,31 @@ async def _handle_user_message(message: Message):
                 f"✅ Имя пользователя #<b>{anon_id}</b> изменено на <b>{esc(new_name)}</b>",
                 reply_markup=admin_cmds_keyboard(),
             )
+            return
+
+        # ── Admin ban reason ──
+        if ban_user_step is not None:
+            if message.text == BTN_CANCEL or message.text == "/cancel":
+                ban_user_step = None
+                await cmd_cancel(message)
+                return
+            reason = (message.text or "").strip()
+            if reason:
+                anon_id = ban_user_step
+                ban_user_step = None
+                uid = db.get_user_id_by_anon(anon_id)
+                if uid:
+                    db.ban_user_with_reason(uid, reason)
+                    await delete_waiting(uid)
+                    await message.answer(f"✅ Пользователь #<b>{anon_id}</b> заблокирован. Причина: {esc(reason[:200])}")
+                    try:
+                        await bot.send_message(uid, f"\U0001f6ab <b>Вы заблокированы.</b>\n\nПричина: {esc(reason[:500])}")
+                    except Exception:
+                        pass
+                else:
+                    await message.answer("❌ Пользователь не найден.")
+            else:
+                await message.answer("❌ Причина не может быть пустой.")
             return
 
         # ── Admin commenting on idea ──

@@ -134,6 +134,7 @@ class Database:
                 id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER UNIQUE NOT NULL,
                 first_name TEXT DEFAULT '', username TEXT DEFAULT '', language_code TEXT DEFAULT '',
                 is_banned INTEGER DEFAULT 0, is_blocked INTEGER DEFAULT 0, is_deleted INTEGER DEFAULT 0,
+                ban_reason TEXT DEFAULT '',
                 appeal_count INTEGER DEFAULT 0, last_appeal TIMESTAMP,
                 cookies INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -197,6 +198,9 @@ class Database:
     def unban_user(self, user_id: int):
         self._exec("UPDATE users SET is_banned = 0 WHERE user_id = ?", [user_id])
 
+    def ban_user_with_reason(self, user_id: int, reason: str = ""):
+        self._exec("UPDATE users SET is_banned = 1, ban_reason = ? WHERE user_id = ?", [reason, user_id])
+
     def get_user(self, user_id: int) -> Optional[TursoRow]:
         return self._fetchone("SELECT * FROM users WHERE user_id = ?", [user_id])
 
@@ -229,7 +233,7 @@ class Database:
     def unmark_blocked(self, anon_id: int):
         self._exec("UPDATE users SET is_blocked = 0 WHERE id = ?", [anon_id])
 
-    def check_appeal_limit(self, anon_id: int, max_per_hour: int = 3) -> tuple:
+    def check_appeal_limit(self, anon_id: int, max_per_day: int = 3) -> tuple:
         u = self._fetchone("SELECT appeal_count, last_appeal FROM users WHERE id = ?", [anon_id])
         if not u:
             return True, 0
@@ -238,10 +242,10 @@ class Database:
         count = u["appeal_count"] or 0
         if last:
             last_dt = datetime.fromisoformat(last)
-            if datetime.now() - last_dt > timedelta(hours=1):
+            if datetime.now() - last_dt > timedelta(days=1):
                 self._exec("UPDATE users SET appeal_count = 0, last_appeal = NULL WHERE id = ?", [anon_id])
                 return True, 0
-        return count < max_per_hour, max_per_hour - count
+        return count < max_per_day, max_per_day - count
 
     def increment_appeal(self, anon_id: int):
         from datetime import datetime
