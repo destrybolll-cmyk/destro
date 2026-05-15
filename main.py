@@ -2314,6 +2314,68 @@ BTN_CMDS = {BTN_WRITE, BTN_HISTORY, BTN_STATS, BTN_LIST, BTN_BANNED,
 async def handle_web_app_data(message: Message):
     try:
         data = json.loads(message.web_app_data.data)
+        action = data.get("action")
+
+        # Challenge from within the game
+        if action == "challenge":
+            user_anon_id = data.get("user_anon_id")
+            challenger_id = message.from_user.id
+            if not user_anon_id:
+                # No target specified → challenge Cookie (admin)
+                anon_id = db.get_anon_id_by_user_id(challenger_id)
+                if not anon_id:
+                    await message.answer("❌ Ты не найден в базе. Напиши боту любое сообщение сначала.")
+                    return
+                accept_kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="✅ Принять", callback_data=f"pong_accept:{anon_id}"),
+                     InlineKeyboardButton(text="❌ Отклонить", callback_data=f"pong_decline:{anon_id}")]
+                ])
+                await bot.send_message(ADMIN_ID, f"\U0001f3d3 <b>Пинг-Понг!</b>\n\nПользователь #{anon_id} хочет сыграть с тобой!", reply_markup=accept_kb)
+                await message.answer("⏳ Ожидаем ответа от Cookie...")
+                return
+                # Admin challenges user directly
+                user = db.get_user_by_anon(user_anon_id)
+                if not user or row_get(user, "is_deleted"):
+                    await message.answer(f"❌ Пользователь #{user_anon_id} не найден.")
+                    return
+                target_user_id = user["user_id"]
+                room_id = f"pong_{user_anon_id}_{int(time.time())}"
+                PONG_ROOMS[room_id] = {
+                    "id": room_id, "p1_ws": None, "p2_ws": None,
+                    "p1_y": 310, "p2_y": 310,
+                    "ball_x": 250, "ball_y": 350,
+                    "ball_vx": 0, "ball_vy": 0,
+                    "p1_score": 0, "p2_score": 0,
+                    "running": False, "loop_task": None,
+                }
+                admin_link = f"https://cookie-anon-bot.onrender.com/game?room={room_id}&side=left"
+                user_link = f"https://cookie-anon-bot.onrender.com/game?room={room_id}&side=right"
+                await message.answer(f"\U0001f3d3 Вызов отправлен пользователю #{user_anon_id}!")
+                try:
+                    await bot.send_message(target_user_id, f"\U0001f3d3 <b>{ADMIN_NAME} вызвал тебя на Пинг-Понг!</b>", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="\U0001f3d3 Открыть игру", web_app=WebAppInfo(url=user_link))]
+                    ]))
+                    await bot.send_message(ADMIN_ID, f"\U0001f3d3 Игра с пользователем #{user_anon_id} создана!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="\U0001f3d3 Открыть игру", web_app=WebAppInfo(url=admin_link))]
+                    ]))
+                except Exception as e:
+                    await message.answer(f"❌ Не удалось отправить приглашение: {e}")
+                return
+            else:
+                # Regular user challenges admin
+                anon_id = db.get_anon_id_by_user_id(challenger_id)
+                if not anon_id:
+                    await message.answer("❌ Ты не найден в базе.")
+                    return
+                accept_kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="✅ Принять", callback_data=f"pong_accept:{anon_id}"),
+                     InlineKeyboardButton(text="❌ Отклонить", callback_data=f"pong_decline:{anon_id}")]
+                ])
+                await bot.send_message(ADMIN_ID, f"\U0001f3d3 <b>Пинг-Понг!</b>\n\nПользователь #{anon_id} хочет сыграть с тобой!", reply_markup=accept_kb)
+                await message.answer("⏳ Ожидаем ответа от Cookie...")
+            return
+
+        # Game result
         result = data.get("result")
         player_score = data.get("playerScore", 0)
         ai_score = data.get("aiScore", 0)
