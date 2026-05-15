@@ -2854,21 +2854,19 @@ GAME_HTML_PATH = os.path.join(os.path.dirname(__file__), "public", "game.html")
 
 async def handle_http(request):
     path = request.url.path
-    if path in ("/health", "/"):
+    if path == "/health":
         return aiohttp_web.Response(text="OK")
-    elif path in ("/game", "/game.html"):
-        try:
-            with open(GAME_HTML_PATH, "rb") as f:
-                data = f.read()
-            return aiohttp_web.Response(body=data, content_type="text/html; charset=utf-8")
-        except FileNotFoundError:
-            return aiohttp_web.Response(status=404)
-    return aiohttp_web.Response(status=404)
+    # Serve game at /game, /game.html, and temporarily at root for testing
+    try:
+        with open(GAME_HTML_PATH, "rb") as f:
+            data = f.read()
+        return aiohttp_web.Response(body=data, content_type="text/html; charset=utf-8")
+    except FileNotFoundError:
+        return aiohttp_web.Response(status=404)
 
 async def run_http_server():
     app = aiohttp_web.Application()
     app.router.add_get("/health", handle_http)
-    app.router.add_get("/", handle_http)
     app.router.add_get("/game", handle_http)
     app.router.add_get("/game.html", handle_http)
     health_port = int(os.getenv("PORT", 8080))
