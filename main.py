@@ -2852,8 +2852,10 @@ GAME_HTML_PATH = os.path.join(os.path.dirname(__file__), "public", "game.html")
 async def handle_http(reader, writer):
     request = await reader.read(8192)
     path = request.split(b" ")[1] if b" " in request and len(request.split(b" ")) > 1 else b"/"
+    resp_headers = "HTTP/1.1 200 OK\r\nConnection: close\r\n"
     if path in (b"/health", b"/"):
-        resp = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK"
+        body = b"OK"
+        resp_headers += "Content-Type: text/plain\r\nContent-Length: 2\r\n"
     elif b"game" in path:
         try:
             with open(GAME_HTML_PATH, "rb") as f:
@@ -2870,16 +2872,13 @@ async def handle_http(reader, writer):
             await writer.wait_closed()
             return
         except FileNotFoundError:
-            resp = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            body = b"File not found"
+            resp_headers += "Content-Length: 14\r\n"
     else:
-        body = f"Debug: path={path.decode()} request={request[:200]}".encode()
-        resp = (
-            "HTTP/1.1 200 OK\r\n"
-            f"Content-Length: {len(body)}\r\n"
-            "Connection: close\r\n"
-            "\r\n"
-        ).encode() + body
-    writer.write(resp.encode() if isinstance(resp, str) else resp)
+        body = f"path={path.decode()}".encode()
+        resp_headers += f"Content-Length: {len(body)}\r\n"
+    resp = (resp_headers + "\r\n").encode() + body
+    writer.write(resp)
     await writer.drain()
     writer.close()
 
