@@ -28,9 +28,9 @@ canvas{width:100%;max-width:500px;aspect-ratio:500/700;background:#161b22;border
 
 <div class="game-wrapper">
   <div class="score">
-    <span class="player">Вы: <b id="playerScore">0</b></span>
-    <span id="gameModeText">⚔️ Cookie</span>
-    <span class="ai">Cookie: <b id="aiScore">0</b></span>
+    <span class="player" id="playerLabel">Вы: <b id="playerScore">0</b></span>
+    <span id="gameModeText">⚔️</span>
+    <span class="ai" id="opponentLabel">Соперник: <b id="aiScore">0</b></span>
   </div>
   <div style="position:relative;width:100%;max-width:500px">
     <canvas id="gameCanvas" width="500" height="700"></canvas>
@@ -38,13 +38,11 @@ canvas{width:100%;max-width:500px;aspect-ratio:500/700;background:#161b22;border
     <div id="gameOver" class="overlay hidden">
       <h2 id="resultTitle">🏓 Игра окончена</h2>
       <div class="score-final" id="finalScore">0:0</div>
-      <button id="restartBtn">🔄 Начать заново</button>
       <button id="closeBtn" class="close-btn">❌ Закрыть</button>
     </div>
-    <div id="startOverlay" class="overlay">
-      <h2>🏓 Пинг-Понг</h2>
-      <p style="color:#8b949e;font-size:14px;max-width:280px">Проведи пальцем вверх/вниз по левой половине экрана, чтобы управлять ракеткой</p>
-      <button id="startBtn">🚀 Играть</button>
+    <div id="waitingOverlay" class="overlay hidden">
+      <h2>⏳ Ожидание соперника...</h2>
+      <p style="color:#8b949e">Подключаемся к игре</p>
     </div>
   </div>
 </div>
@@ -56,17 +54,151 @@ const W=500,H=700;
 const PADDLE_W=10,PADDLE_H=80,BALL_R=8,SPEED_INIT=4;
 const WIN_SCORE=7;
 
+// Parse URL params
+const params=new URLSearchParams(window.location.search);
+const roomId=params.get('room');
+const side=params.get('side')||'left';
+const isMultiplayer=!!roomId;
+
 let playerY=H/2-PADDLE_H/2,aiY=H/2-PADDLE_H/2;
 let ballX=W/2,ballY=H/2,bSpeed=SPEED_INIT,bVx=0,bVy=0;
 let playerScore=0,aiScore=0;
 let gameRunning=false,gameStarted=false;
-let countdownVal=3;
-let lastTouchY=null;
 let targetPlayerY=H/2-PADDLE_H/2;
+
+// WebSocket
+let ws=null;
+
+if(isMultiplayer){
+  document.getElementById('gameModeText').textContent='🏓 Cookie';
+  document.getElementById('opponentLabel').innerHTML='Cookie: <b id="aiScore">0</b>';
+  document.getElementById('waitingOverlay').classList.remove('hidden');
+  connectWs();
+}else{
+  document.getElementById('gameModeText').textContent='⚔️ AI';
+  document.getElementById('opponentLabel').innerHTML='AI: <b id="aiScore">0</b>';
+}
+
+function connectWs(){
+  const proto=window.location.protocol==='https:'?'wss:':'ws:';
+  const url=`${proto}//${window.location.host}/ws?room=${roomId}&side=${side}`;
+  ws=new WebSocket(url);
+  ws.onopen=()=>{};
+  ws.onmessage=(e)=>{
+    const data=JSON.parse(e.data);
+    handleWsMessage(data);
+  };
+  ws.onclose=()=>{
+    if(gameRunning){
+      showGameOver('disconnect');
+    }
+  };
+  ws.onerror=()=>{};
+}
+
+function handleWsMessage(data){
+  if(data.type==='joined'){
+    document.getElementById('waitingOverlay').classList.add('hidden');
+  }else if(data.type==='countdown'){
+    const cd=document.getElementById('countdown');
+    cd.textContent=data.value;
+    cd.classList.remove('hidden');
+  }else if(data.type==='start'){
+    document.getElementById('countdown').classList.add('hidden');
+    gameRunning=true;gameStarted=true;
+    gameLoop();
+  }else if(data.type==='state'){
+    ballX=data.ball_x;ballY=data.ball_y;
+    if(side==='left'){
+      aiY=data.p2_y;
+      playerScore=data.p1_score;aiScore=data.p2_score;
+    }else{
+      aiY=data.p1_y;
+      playerScore=data.p2_score;aiScore=data.p1_score;
+    }
+    updateScore();
+  }else if(data.type==='game_over'){
+    gameRunning=false;
+    const winner=data.winner;
+    const scores=data.scores;
+    const isP1=side==='left';
+    const pScore=isP1?scores[0]:scores[1];
+    const aScore=isP1?scores[1]:scores[0];
+    playerScore=pScore;aiScore=aScore;
+    updateScore();
+    let title;
+    if((isP1&&winner==='p1')||(!isP1&&winner==='p2')){
+      title='🎉 Победа!';
+      result='win';
+    }else{
+      title='😈 Поражение';
+      result='lose';
+    }
+    document.getElementById('finalScore').textContent=`${pScore}:${aScore}`;
+    document.getElementById('resultTitle').textContent=title;
+    document.getElementById('gameOver').classList.remove('hidden');
+    // Send result to bot
+    if(window.TelegramWebviewProxy||window.Telegram){
+      try{
+        window.Telegram.WebApp.sendData(JSON.stringify({result,playerScore:pScore,aiScore:aScore}));
+      }catch(e){}
+    }
+  }else if(data.type==='error'){
+    document.getElementById('waitingOverlay').innerHTML=`<h2>❌ Ошибка</h2><p>${data.msg}</p>`;
+  }
+}
 
 function updateScore(){
   document.getElementById('playerScore').textContent=playerScore;
   document.getElementById('aiScore').textContent=aiScore;
+}
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.strokeStyle='#30363d';ctx.lineWidth=2;ctx.setLineDash([8,8]);
+  ctx.beginPath();ctx.moveTo(W/2,0);ctx.lineTo(W/2,H);ctx.stroke();ctx.setLineDash([]);
+  // Player paddle
+  ctx.fillStyle='#58a6ff';
+  if(side==='left')ctx.fillRect(20,playerY,PADDLE_W,PADDLE_H);
+  else ctx.fillRect(W-20-PADDLE_W,playerY,PADDLE_W,PADDLE_H);
+  // Opponent paddle
+  ctx.fillStyle='#f85149';
+  if(side==='left')ctx.fillRect(W-20-PADDLE_W,aiY,PADDLE_W,PADDLE_H);
+  else ctx.fillRect(20,aiY,PADDLE_W,PADDLE_H);
+  // Ball
+  ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(ballX,ballY,BALL_R,0,Math.PI*2);ctx.fill();
+}
+
+function update(){
+  if(!gameRunning||isMultiplayer)return;
+  // AI mode physics (same as before)
+  ballX+=bVx;ballY+=bVy;
+  if(ballY-BALL_R<0){ballY=BALL_R;bVy=-bVy}
+  if(ballY+BALL_R>H){ballY=H-BALL_R;bVy=-bVy}
+  if(ballX-BALL_R<20+PADDLE_W&&ballX-BALL_R>20&&ballY>playerY&&ballY<playerY+PADDLE_H){
+    ballX=20+PADDLE_W+BALL_R;bVx=-bVx;
+    bSpeed=Math.min(bSpeed+0.15,8);bVx=Math.sign(bVx)*bSpeed;
+    const rel=(ballY-playerY)/PADDLE_H-0.5;bVy+=rel*1.5;
+  }
+  if(ballX+BALL_R>W-20-PADDLE_W&&ballX+BALL_R<W-20&&ballY>aiY&&ballY<aiY+PADDLE_H){
+    ballX=W-20-PADDLE_W-BALL_R;bVx=-bVx;
+    bSpeed=Math.min(bSpeed+0.15,8);bVx=Math.sign(bVx)*bSpeed;
+    const rel=(ballY-aiY)/PADDLE_H-0.5;bVy+=rel*1.5;
+  }
+  if(ballX<0){aiScore++;updateScore();if(aiScore>=WIN_SCORE)endGame('ai');else resetBall()}
+  if(ballX>W){playerScore++;updateScore();if(playerScore>=WIN_SCORE)endGame('player');else resetBall()}
+  // AI movement
+  const aiSpeed=3.2;
+  const aiTarget=bVy>0?ballY+PADDLE_H/4:ballY-PADDLE_H/4;
+  if(Math.abs(aiTarget-aiY-PADDLE_H/2)>aiSpeed){
+    aiY+=Math.sign(aiTarget-aiY-PADDLE_H/2)*aiSpeed;
+  }
+  aiY=Math.max(0,Math.min(H-PADDLE_H,aiY));
+  // Player
+  const pSpeed=5;
+  if(Math.abs(targetPlayerY-playerY)>pSpeed)playerY+=Math.sign(targetPlayerY-playerY)*pSpeed;
+  else playerY=targetPlayerY;
+  playerY=Math.max(0,Math.min(H-PADDLE_H,playerY));
 }
 
 function resetBall(){
@@ -77,27 +209,6 @@ function resetBall(){
   bVy=Math.sin(angle)*bSpeed;
 }
 
-function resetGame(){
-  playerY=H/2-PADDLE_H/2;aiY=H/2-PADDLE_H/2;
-  playerScore=0;aiScore=0;updateScore();
-  resetBall();gameRunning=false;gameStarted=false;
-}
-
-function startCountdown(){
-  const cd=document.getElementById('countdown');
-  countdownVal=3;cd.textContent='3';cd.classList.remove('hidden');
-  resetGame();
-  const iv=setInterval(()=>{
-    countdownVal--;
-    if(countdownVal>0)cd.textContent=countdownVal;
-    else{
-      clearInterval(iv);cd.classList.add('hidden');
-      gameRunning=true;gameStarted=true;
-      startGameLoop();
-    }
-  },800);
-}
-
 function endGame(winner){
   gameRunning=false;gameStarted=false;
   document.getElementById('finalScore').textContent=`${playerScore}:${aiScore}`;
@@ -106,7 +217,6 @@ function endGame(winner){
   else if(winner==='ai')title.textContent='😈 Поражение';
   else title.textContent='🤝 Ничья';
   document.getElementById('gameOver').classList.remove('hidden');
-  // Send result to bot
   const result=winner==='player'?'win':winner==='ai'?'lose':'draw';
   if(window.TelegramWebviewProxy||window.Telegram){
     try{
@@ -116,110 +226,72 @@ function endGame(winner){
   }
 }
 
-function draw(){
-  ctx.clearRect(0,0,W,H);
-  // Center line
-  ctx.strokeStyle='#30363d';ctx.lineWidth=2;ctx.setLineDash([8,8]);
-  ctx.beginPath();ctx.moveTo(W/2,0);ctx.lineTo(W/2,H);ctx.stroke();ctx.setLineDash([]);
-  // Player paddle
-  ctx.fillStyle='#58a6ff';ctx.fillRect(20,playerY,PADDLE_W,PADDLE_H);
-  // AI paddle
-  ctx.fillStyle='#f85149';ctx.fillRect(W-20-PADDLE_W,aiY,PADDLE_W,PADDLE_H);
-  // Ball
-  ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(ballX,ballY,BALL_R,0,Math.PI*2);ctx.fill();
-}
-
-function update(){
-  if(!gameRunning)return;
-  // Move ball
-  ballX+=bVx;ballY+=bVy;
-  // Wall bounce
-  if(ballY-BALL_R<0){ballY=BALL_R;bVy=-bVy}
-  if(ballY+BALL_R>H){ballY=H-BALL_R;bVy=-bVy}
-  // Player paddle collision
-  if(ballX-BALL_R<20+PADDLE_W&&ballX-BALL_R>20&&ballY>playerY&&ballY<playerY+PADDLE_H){
-    ballX=20+PADDLE_W+BALL_R;bVx=-bVx;
-    bSpeed=Math.min(bSpeed+0.15,8);bVx=Math.sign(bVx)*bSpeed;
-    const rel=(ballY-playerY)/PADDLE_H-0.5;bVy+=rel*1.5;
-  }
-  // AI paddle collision
-  if(ballX+BALL_R>W-20-PADDLE_W&&ballX+BALL_R<W-20&&ballY>aiY&&ballY<aiY+PADDLE_H){
-    ballX=W-20-PADDLE_W-BALL_R;bVx=-bVx;
-    bSpeed=Math.min(bSpeed+0.15,8);bVx=Math.sign(bVx)*bSpeed;
-    const rel=(ballY-aiY)/PADDLE_H-0.5;bVy+=rel*1.5;
-  }
-  // Scoring
-  if(ballX<0){aiScore++;updateScore();if(aiScore>=WIN_SCORE)endGame('ai');else resetBall()}
-  if(ballX>W){playerScore++;updateScore();if(playerScore>=WIN_SCORE)endGame('player');else resetBall()}
-  // AI movement
-  const aiSpeed=3.2;
-  if(ballX>W/2||ballX<W/3){} // AI tracks ball when it's on its side
-  const aiTarget=bVy>0?ballY+PADDLE_H/4:ballY-PADDLE_H/4;
-  if(Math.abs(aiTarget-aiY-PADDLE_H/2)>aiSpeed){
-    aiY+=Math.sign(aiTarget-aiY-PADDLE_H/2)*aiSpeed;
-  }
-  aiY=Math.max(0,Math.min(H-PADDLE_H,aiY));
-  // Player movement (smooth follow)
-  const pSpeed=5;
-  if(Math.abs(targetPlayerY-playerY)>pSpeed){
-    playerY+=Math.sign(targetPlayerY-playerY)*pSpeed;
-  }else playerY=targetPlayerY;
-  playerY=Math.max(0,Math.min(H-PADDLE_H,playerY));
-}
-
-// Touch/Click controls
 function handleMove(y){
   const rect=canvas.getBoundingClientRect();
   const scaleY=H/rect.height;
   targetPlayerY=(y-rect.top)*scaleY-PADDLE_H/2;
   targetPlayerY=Math.max(0,Math.min(H-PADDLE_H,targetPlayerY));
+  if(isMultiplayer&&ws&&ws.readyState===WebSocket.OPEN){
+    ws.send(JSON.stringify({type:'move',y:targetPlayerY}));
+  }
 }
 
 canvas.addEventListener('touchstart',(e)=>{
-  if(!gameStarted)startCountdown();
+  if(!gameStarted&&!isMultiplayer)startAIGame();
   e.preventDefault();
-  const t=e.touches[0];lastTouchY=t.clientY;
-  handleMove(t.clientY);
+  handleMove(e.touches[0].clientY);
 },{passive:false});
 
 canvas.addEventListener('touchmove',(e)=>{
   e.preventDefault();
-  const t=e.touches[0];lastTouchY=t.clientY;
-  handleMove(t.clientY);
+  handleMove(e.touches[0].clientY);
 },{passive:false});
 
 canvas.addEventListener('mousedown',(e)=>{
-  if(!gameStarted)startCountdown();
+  if(!gameStarted&&!isMultiplayer)startAIGame();
   handleMove(e.clientY);
 });
 canvas.addEventListener('mousemove',(e)=>{
   if(e.buttons&1)handleMove(e.clientY);
 });
 
-// Buttons
-document.getElementById('startBtn').addEventListener('click',()=>{
-  document.getElementById('startOverlay').classList.add('hidden');
-  startCountdown();
-});
-document.getElementById('restartBtn').addEventListener('click',()=>{
-  document.getElementById('gameOver').classList.add('hidden');
-  startCountdown();
-});
 document.getElementById('closeBtn').addEventListener('click',()=>{
   if(window.TelegramWebviewProxy||window.Telegram){
     try{window.Telegram.WebApp.close()}catch(e){}
   }
 });
 
+function showGameOver(reason){
+  gameRunning=false;
+  document.getElementById('finalScore').textContent=`${playerScore}:${aiScore}`;
+  document.getElementById('resultTitle').textContent='❌ Соединение потеряно';
+  document.getElementById('gameOver').classList.remove('hidden');
+}
+
+// AI mode
+function startAIGame(){
+  playerY=H/2-PADDLE_H/2;aiY=H/2-PADDLE_H/2;
+  playerScore=0;aiScore=0;updateScore();
+  resetBall();
+  const cd=document.getElementById('countdown');
+  let val=3;cd.textContent='3';cd.classList.remove('hidden');
+  const iv=setInterval(()=>{
+    val--;
+    if(val>0)cd.textContent=val;
+    else{
+      clearInterval(iv);cd.classList.add('hidden');
+      gameRunning=true;gameStarted=true;
+      gameLoop();
+    }
+  },800);
+}
+
 function gameLoop(){
-  update();draw();requestAnimationFrame(gameLoop);
+  update();draw();
+  if(gameRunning)requestAnimationFrame(gameLoop);
 }
 
-function startGameLoop(){
-  gameLoop();
-}
-
-// Init Telegram WebApp
+// Init Telegram
 try{
   if(window.TelegramWebviewProxy||window.Telegram){
     const tg=window.Telegram.WebApp;

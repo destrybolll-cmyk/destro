@@ -2,11 +2,15 @@ import asyncio
 import json
 import logging
 import html
+import math
 import os
 import random
 import secrets
 import time
 from datetime import datetime
+
+import aiohttp
+from aiohttp import web
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -1121,7 +1125,7 @@ async def _handle_callback(callback: CallbackQuery):
                        "wisdom", "user_ttt", "user_idea", "idea_accept", "idea_reject", "idea_comment",
                        "diary_read", "diary_pgn", "diary_edit",
                        "diary_notify", "diary_notify_off",
-                        "none"):
+                        "pong_challenge", "none"):
             pass
         else:
             await callback.answer(f"❌ Только для {ADMIN_NAME}.", show_alert=True)
@@ -1809,6 +1813,21 @@ async def _handle_callback(callback: CallbackQuery):
         await callback.answer()
         return
 
+    elif action == "pong_challenge":
+        await callback.answer()
+        user_id = callback.from_user.id
+        anon_id = db.get_anon_id_by_user_id(user_id)
+        if not anon_id:
+            await callback.message.answer("❌ Ты не найден в базе. Напиши боту любое сообщение.")
+            return
+        accept_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="\u2705 Принять", callback_data=f"pong_accept:{anon_id}"),
+             InlineKeyboardButton(text="\u274c Отклонить", callback_data=f"pong_decline:{anon_id}")]
+        ])
+        await bot.send_message(ADMIN_ID, f"\U0001f3d3 <b>Пинг-Понг!</b>\n\nПользователь #{anon_id} хочет сыграть с тобой!", reply_markup=accept_kb)
+        await callback.message.answer("\u23f3 Ожидаем ответа от Cookie... Как только он примет, игра начнётся!")
+        return
+
     # ── Admin-only callbacks ──
 
     if not is_admin(callback.from_user.id):
@@ -1839,6 +1858,45 @@ async def _handle_callback(callback: CallbackQuery):
             "/cancel \u2014 отменить",
             reply_markup=admin_cmds_keyboard(),
         )
+        return
+
+    elif action == "pong_accept":
+        await callback.answer()
+        user_anon_id = anon_id
+        target_user_id = target_user_id
+        room_id = f"pong_{user_anon_id}_{int(time.time())}"
+        PONG_ROOMS[room_id] = {
+            "id": room_id,
+            "p1_ws": None, "p2_ws": None,
+            "p1_y": 310, "p2_y": 310,
+            "ball_x": 250, "ball_y": 350,
+            "ball_vx": 0, "ball_vy": 0,
+            "p1_score": 0, "p2_score": 0,
+            "running": False,
+            "loop_task": None,
+        }
+        user_link = f"https://cookie-anon-bot.onrender.com/game?room={room_id}&side=right"
+        admin_link = f"https://cookie-anon-bot.onrender.com/game?room={room_id}&side=left"
+        play_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="\U0001f3d3 Открыть игру", web_app=WebAppInfo(url=admin_link))]
+        ])
+        try:
+            await bot.send_message(target_user_id, f"\U0001f3d3 <b>Cookie принял вызов!</b>\n\nНажимай кнопку, чтобы начать!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="\U0001f3d3 Открыть игру", web_app=WebAppInfo(url=user_link))]
+            ]))
+        except Exception:
+            await callback.message.answer("❌ Не удалось отправить приглашение пользователю.")
+            return
+        await callback.message.answer(f"\U0001f3d3 <b>Игра началась!</b>\n\nНажимай кнопку!", reply_markup=play_kb)
+        return
+
+    elif action == "pong_decline":
+        await callback.answer()
+        try:
+            await bot.send_message(target_user_id, "😔 Cookie отклонил вызов.")
+        except Exception:
+            pass
+        await callback.message.answer("❌ Вызов отклонён.")
         return
 
     elif action == "info":
@@ -2203,17 +2261,18 @@ async def handle_web_app_data(message: Message):
 
 @dp.message(Command("pingpong"))
 async def cmd_pingpong(message: Message):
-    play_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="\U0001f3d3 Играть в Пинг-Понг", web_app=WebAppInfo(url=GAME_URL))]
+    game_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="\U0001f916 Против AI", web_app=WebAppInfo(url=GAME_URL))],
+        [InlineKeyboardButton(text="\U0001f451 Против Cookie", callback_data="pong_challenge")],
     ])
     stats = None
     anon_id = db.get_anon_id_by_user_id(message.from_user.id)
     if anon_id:
         stats = db.get_ping_pong_stats(anon_id)
-    text = "\U0001f3d3 <b>Пинг-Понг</b>\n\nНажми кнопку ниже, чтобы запустить игру! Играй против ИИ Cookie."
+    text = "\U0001f3d3 <b>Пинг-Понг</b>\n\nВыбери режим:"
     if stats and stats['total'] > 0:
         text += f"\n\n\U0001f4ca <b>Твоя статистика:</b>\n\U0001f3c6 Побед: {stats['wins']} | \U0001f4a2 Поражений: {stats['losses']}\n\U0001f3af Рекорд: {stats['best']} очков"
-    await message.answer(text, reply_markup=play_kb)
+    await message.answer(text, reply_markup=game_kb)
 
 @dp.message()
 async def handle_user_message(message: Message):
@@ -2588,10 +2647,11 @@ async def _handle_user_message(message: Message):
             await message.answer("\U0001f4d6 <b>Дневник Cookie</b>\n\nЗаписывай свои мысли — пользователи смогут их читать.", reply_markup=diary_kb)
             return
         if message.text == BTN_GAME:
-            play_kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="\U0001f3d3 Играть в Пинг-Понг", web_app=WebAppInfo(url=GAME_URL))]
+            game_kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="\U0001f916 Против AI", web_app=WebAppInfo(url=GAME_URL))],
+                [InlineKeyboardButton(text="\U0001f451 Против Cookie", callback_data="pong_challenge")],
             ])
-            await message.answer("\U0001f3d3 <b>Пинг-Понг</b>\n\nНажми кнопку ниже, чтобы запустить игру!", reply_markup=play_kb)
+            await message.answer("\U0001f3d3 <b>Пинг-Понг</b>\n\nВыбери режим:", reply_markup=game_kb)
             return
         if message.text == BTN_HELP:
             return await cmd_help(message)
@@ -2845,58 +2905,205 @@ async def _handle_user_message(message: Message):
     waiting_messages[user_id] = wait_msg.message_id
 
 
-# ────────── HTTP server (health + game) ──────────────────────────
+# ────────── WebSocket game rooms ────────────────────────────
+
+PONG_ROOMS: dict[str, dict] = {}
+
+def create_pong_room(room_id: str) -> dict:
+    room = {
+        "id": room_id,
+        "p1_ws": None, "p2_ws": None,
+        "p1_y": 310, "p2_y": 310,
+        "ball_x": 250, "ball_y": 350,
+        "ball_vx": 0, "ball_vy": 0,
+        "p1_score": 0, "p2_score": 0,
+        "running": False,
+        "loop_task": None,
+    }
+    PONG_ROOMS[room_id] = room
+    return room
+
+async def pong_game_loop(room_id: str):
+    room = PONG_ROOMS.get(room_id)
+    if not room:
+        return
+    W, H = 500, 700
+    PADDLE_H = 80
+    BALL_R = 8
+    WIN_SCORE = 7
+    speed = 4.5
+    angle = (random.random() * 0.8 - 0.4)
+    room["ball_vx"] = (1 if random.random() > 0.5 else -1) * math.cos(angle) * speed
+    room["ball_vy"] = math.sin(angle) * speed
+    room["ball_x"] = W / 2
+    room["ball_y"] = H / 2
+    room["running"] = True
+    while room["running"]:
+        room["ball_x"] += room["ball_vx"]
+        room["ball_y"] += room["ball_vy"]
+        # Wall bounce
+        if room["ball_y"] - BALL_R < 0:
+            room["ball_y"] = BALL_R
+            room["ball_vy"] = -room["ball_vy"]
+        if room["ball_y"] + BALL_R > H:
+            room["ball_y"] = H - BALL_R
+            room["ball_vy"] = -room["ball_vy"]
+        # Paddle collisions
+        px = 20
+        if room["ball_x"] - BALL_R < px + 10 and room["ball_x"] - BALL_R > px and room["ball_y"] > room["p1_y"] and room["ball_y"] < room["p1_y"] + PADDLE_H:
+            room["ball_x"] = px + 10 + BALL_R
+            room["ball_vx"] = -room["ball_vx"]
+            speed = min(speed + 0.1, 7)
+            room["ball_vx"] = (1 if room["ball_vx"] > 0 else -1) * speed
+            rel = (room["ball_y"] - room["p1_y"]) / PADDLE_H - 0.5
+            room["ball_vy"] += rel * 1.2
+        px2 = W - 20 - 10
+        if room["ball_x"] + BALL_R > px2 and room["ball_x"] + BALL_R < px2 + 10 and room["ball_y"] > room["p2_y"] and room["ball_y"] < room["p2_y"] + PADDLE_H:
+            room["ball_x"] = px2 - BALL_R
+            room["ball_vx"] = -room["ball_vx"]
+            speed = min(speed + 0.1, 7)
+            room["ball_vx"] = (1 if room["ball_vx"] > 0 else -1) * speed
+            rel = (room["ball_y"] - room["p2_y"]) / PADDLE_H - 0.5
+            room["ball_vy"] += rel * 1.2
+        # Scoring
+        if room["ball_x"] < 0:
+            room["p2_score"] += 1
+            if room["p2_score"] >= WIN_SCORE:
+                room["running"] = False
+                await broadcast_room(room_id, {"type": "game_over", "winner": "p2", "scores": [room["p1_score"], room["p2_score"]]})
+                break
+            reset_pong_ball(room, 1)
+        if room["ball_x"] > W:
+            room["p1_score"] += 1
+            if room["p1_score"] >= WIN_SCORE:
+                room["running"] = False
+                await broadcast_room(room_id, {"type": "game_over", "winner": "p1", "scores": [room["p1_score"], room["p2_score"]]})
+                break
+            reset_pong_ball(room, -1)
+        # Broadcast state
+        state = {
+            "type": "state",
+            "ball_x": room["ball_x"], "ball_y": room["ball_y"],
+            "p1_y": room["p1_y"], "p2_y": room["p2_y"],
+            "p1_score": room["p1_score"], "p2_score": room["p2_score"],
+        }
+        await broadcast_room(room_id, state)
+        await asyncio.sleep(0.016)  # ~60 FPS
+
+def reset_pong_ball(room, dir_sign):
+    import math
+    room["ball_x"] = 250
+    room["ball_y"] = 350
+    speed = 4.5
+    angle = (random.random() * 0.8 - 0.4)
+    room["ball_vx"] = dir_sign * math.cos(angle) * speed
+    room["ball_vy"] = math.sin(angle) * speed
+
+async def broadcast_room(room_id: str, data: dict):
+    msg = json.dumps(data)
+    room = PONG_ROOMS.get(room_id)
+    if not room:
+        return
+    for ws in (room.get("p1_ws"), room.get("p2_ws")):
+        if ws and not ws.closed:
+            try:
+                await ws.send_str(msg)
+            except Exception:
+                pass
+
+# ────────── Web server (aiohttp) ─────────────────────────────
 
 GAME_HTML_PATH = os.path.join(os.path.dirname(__file__), "public", "game.html")
 
-async def handle_http(reader, writer):
-    request = await reader.read(8192)
-    path = request.split(b" ")[1] if b" " in request and len(request.split(b" ")) > 1 else b"/"
-    resp_headers = "HTTP/1.1 200 OK\r\nConnection: close\r\n"
-    if path in (b"/health", b"/"):
-        body = b"OK_VER2"
-        resp_headers += "Content-Type: text/plain\r\nContent-Length: 7\r\n"
-    elif b"game" in path:
-        try:
-            with open(GAME_HTML_PATH, "rb") as f:
-                data = f.read()
-            resp = (
-                "HTTP/1.1 200 OK\r\n"
-                "Content-Type: text/html; charset=utf-8\r\n"
-                f"Content-Length: {len(data)}\r\n"
-                "Connection: close\r\n"
-                "\r\n"
-            ).encode() + data
-            writer.write(resp)
-            await writer.drain()
-            await writer.wait_closed()
-            return
-        except FileNotFoundError:
-            body = b"File not found"
-            resp_headers += "Content-Length: 14\r\n"
-    else:
-        body = f"path={path.decode()}".encode()
-        resp_headers += f"Content-Length: {len(body)}\r\n"
-    resp = (resp_headers + "\r\n").encode() + body
-    writer.write(resp)
-    await writer.drain()
-    writer.close()
+async def handle_index(request):
+    return web.Response(text="OK")
 
-async def run_http_server():
-    health_port = int(os.getenv("PORT", 8080))
-    for attempt in range(5):
-        try:
-            server = await asyncio.start_server(handle_http, host="0.0.0.0", port=health_port, reuse_address=True, reuse_port=True)
-            break
-        except OSError as e:
-            if attempt < 4:
-                await asyncio.sleep(2)
-                continue
-            logging.error(f"Failed to start HTTP server: {e}")
-            return
-    logging.info(f"\U0001fa7a HTTP server on :{health_port}")
-    async with server:
-        await server.serve_forever()
+async def handle_game(request):
+    try:
+        with open(GAME_HTML_PATH, "rb") as f:
+            data = f.read()
+        return web.Response(body=data, content_type="text/html; charset=utf-8")
+    except FileNotFoundError:
+        return web.Response(status=404)
+
+async def handle_websocket(request):
+    ws = web.WebSocketResponse()
+    await ws.prepare(request)
+    room_id = request.query.get("room")
+    side = request.query.get("side", "left")
+    if not room_id or room_id not in PONG_ROOMS:
+        await ws.send_json({"type": "error", "msg": "Room not found"})
+        await ws.close()
+        return ws
+    room = PONG_ROOMS[room_id]
+    if side == "left":
+        if room["p1_ws"] and not room["p1_ws"].closed:
+            await ws.send_json({"type": "error", "msg": "Player 1 already connected"})
+            await ws.close()
+            return ws
+        room["p1_ws"] = ws
+    else:
+        if room["p2_ws"] and not room["p2_ws"].closed:
+            await ws.send_json({"type": "error", "msg": "Player 2 already connected"})
+            await ws.close()
+            return ws
+        room["p2_ws"] = ws
+    await ws.send_json({"type": "joined", "side": side})
+    # Start game if both connected
+    if room["p1_ws"] and not room["p1_ws"].closed and room["p2_ws"] and not room["p2_ws"].closed:
+        await broadcast_room(room_id, {"type": "countdown", "value": 3})
+        await asyncio.sleep(1)
+        await broadcast_room(room_id, {"type": "countdown", "value": 2})
+        await asyncio.sleep(1)
+        await broadcast_room(room_id, {"type": "countdown", "value": 1})
+        await asyncio.sleep(1)
+        await broadcast_room(room_id, {"type": "start"})
+        room["loop_task"] = asyncio.create_task(pong_game_loop(room_id))
+    # Listen for paddle moves
+    try:
+        async for msg in ws:
+            if msg.type == aiohttp.WSMsgType.TEXT:
+                data = json.loads(msg.data)
+                if data.get("type") == "move":
+                    y = data["y"]
+                    if side == "left":
+                        room["p1_y"] = y
+                    else:
+                        room["p2_y"] = y
+            elif msg.type == aiohttp.WSMsgType.ERROR:
+                break
+    except Exception:
+        pass
+    finally:
+        # Clean up
+        if room_id in PONG_ROOMS:
+            room = PONG_ROOMS[room_id]
+            if side == "left":
+                room["p1_ws"] = None
+            else:
+                room["p2_ws"] = None
+            room["running"] = False
+            if room["loop_task"]:
+                room["loop_task"].cancel()
+            # Remove room if both disconnected
+            if not room["p1_ws"] and not room["p2_ws"]:
+                del PONG_ROOMS[room_id]
+    return ws
+
+async def run_web_server():
+    app = web.Application()
+    app.router.add_get("/health", handle_index)
+    app.router.add_get("/", handle_index)
+    app.router.add_get("/game", handle_game)
+    app.router.add_get("/game.html", handle_game)
+    app.router.add_get("/ws", handle_websocket)
+    web_port = int(os.getenv("PORT", 8080))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", web_port)
+    await site.start()
+    logging.info(f"\U0001fa7a Web server on :{web_port}")
+    await asyncio.Event().wait()
 
 
 async def daily_wisdom_task():
@@ -2937,7 +3144,7 @@ async def keep_awake_task():
 # ────────────────────────────── Entry ──────────────────────────
 
 async def main():
-    http_task = asyncio.create_task(run_http_server())
+    http_task = asyncio.create_task(run_web_server())
     wisdom_task = asyncio.create_task(daily_wisdom_task())
     keep_awake = asyncio.create_task(keep_awake_task())
     while True:
