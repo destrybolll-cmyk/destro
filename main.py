@@ -2851,6 +2851,7 @@ GAME_HTML_PATH = os.path.join(os.path.dirname(__file__), "public", "game.html")
 
 async def handle_http(reader, writer):
     request = await reader.read(8192)
+    req_str = request.decode("utf-8", errors="replace")
     if b"GET /health" in request or b"GET / " in request:
         resp = (
             "HTTP/1.1 200 OK\r\n"
@@ -2860,7 +2861,7 @@ async def handle_http(reader, writer):
             "\r\n"
             "OK"
         )
-    elif b"GET /game" in request:
+    elif b"/game" in request:
         try:
             with open(GAME_HTML_PATH, "rb") as f:
                 data = f.read()
@@ -2878,8 +2879,14 @@ async def handle_http(reader, writer):
         except FileNotFoundError:
             resp = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
     else:
-        resp = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-    writer.write(resp.encode())
+        body = f"Unknown path, request: {req_str[:200]}".encode()
+        resp = (
+            "HTTP/1.1 404 Not Found\r\n"
+            f"Content-Length: {len(body)}\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+        ).encode() + body
+    writer.write(resp)
     await writer.drain()
     writer.close()
 
