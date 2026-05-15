@@ -310,9 +310,9 @@ class Database:
             where += " AND date(messages.timestamp) = date(?)"
             params.append(date_filter)
         rows = self._fetchall(
-            f"""SELECT m.*, u.first_name, u.username FROM messages m
-            LEFT JOIN users u ON m.user_id = u.user_id
-            WHERE {where} ORDER BY m.timestamp DESC LIMIT ? OFFSET ?""",
+            f"""SELECT messages.*, u.first_name, u.username FROM messages
+            LEFT JOIN users u ON messages.user_id = u.user_id
+            WHERE {where} ORDER BY messages.timestamp DESC LIMIT ? OFFSET ?""",
             params + [per_page, offset])
         uid_row = self._fetchone("SELECT user_id FROM users WHERE id = ?", [anon_id])
         total = self._fetchval(f"SELECT COUNT(*) FROM messages WHERE {where}", params)
