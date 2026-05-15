@@ -138,6 +138,7 @@ async def forward_media(chat_id: int, message: Message, caption: str = "", reply
 
 ADMIN_NAME = "Cookie"
 USERS_PER_PAGE = 10
+TIMEZONE_OFFSET = 5  # UTC+5 hours
 
 logging.basicConfig(
     level=logging.INFO,
@@ -161,6 +162,18 @@ def esc(text: str) -> str:
 
 def is_admin(user_id: int) -> bool:
     return user_id == ADMIN_ID
+
+
+def local_time(ts: str) -> str:
+    """Convert UTC timestamp to local time (+5h)"""
+    if not ts:
+        return "???"
+    from datetime import timedelta
+    try:
+        dt = datetime.fromisoformat(ts) + timedelta(hours=TIMEZONE_OFFSET)
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return ts[:19]
 
 
 def row_get(row, key: str, default=0):
@@ -1022,7 +1035,7 @@ async def cmd_history(message: Message):
             name = esc(r["first_name"] or f"#{current_id}")
             username = f" @{esc(r['username'])}" if r["username"] else ""
             lines.append(f"\n👤 #{current_id} \u2014 {name}{username}:")
-        time = r["timestamp"][:19] if r["timestamp"] else "???"
+        time = local_time(r["timestamp"])
         direction = r.get("direction", "user_to_admin")
         icon = "\u2709\ufe0f" if direction == "admin_to_user" else "\U0001f4e9"
         label = f"({time})"  # e.g., (2026-05-14 12:30:45)
