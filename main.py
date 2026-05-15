@@ -1817,12 +1817,16 @@ async def _handle_callback(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         return
 
-    anon_id = int(parts[1])
-    target_user_id = db.get_user_id_by_anon(anon_id)
-
-    if target_user_id is None:
-        await callback.answer("❌ Пользователь не найден.", show_alert=True)
-        return
+    # history_all, pgn, pgn_del use page number, not anon_id
+    if action not in ("history_all", "pgn", "pgn_del"):
+        anon_id = int(parts[1])
+        target_user_id = db.get_user_id_by_anon(anon_id)
+        if target_user_id is None:
+            await callback.answer("❌ Пользователь не найден.", show_alert=True)
+            return
+    else:
+        anon_id = None
+        target_user_id = None
 
     if action == "reply":
         admin_pending_reply = anon_id
@@ -1921,7 +1925,7 @@ async def _handle_callback(callback: CallbackQuery):
         return
 
     elif action == "pgn":
-        page = anon_id
+        page = int(parts[1])
         await callback.answer()
         text, markup = paginated_users_list(page)
         if markup:
@@ -1931,7 +1935,7 @@ async def _handle_callback(callback: CallbackQuery):
         return
 
     elif action == "pgn_del":
-        page = anon_id
+        page = int(parts[1])
         await callback.answer()
         text, markup = paginated_users_list(page, action="del_ask", nav_prefix="pgn_del")
         if markup:
