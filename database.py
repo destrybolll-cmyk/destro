@@ -173,6 +173,13 @@ class Database:
                 text TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )''',
+            '''CREATE TABLE IF NOT EXISTS ping_pong (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL, anon_id INTEGER NOT NULL,
+                result TEXT NOT NULL, player_score INTEGER DEFAULT 0,
+                ai_score INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )''',
         ]:
             self._exec(sql)
     # ──────────── User methods ────────────
@@ -359,6 +366,28 @@ class Database:
                 [anon_id, opponent_anon_id, opponent_anon_id, anon_id, limit])
         return self._fetchall("SELECT * FROM games WHERE (player1_anon_id = ? OR player2_anon_id = ?) AND status = 'finished' ORDER BY id DESC LIMIT ?",
                              [anon_id, anon_id, limit])
+
+    # ──────────── Ping-Pong methods ────────────
+
+    def save_ping_pong(self, user_id: int, anon_id: int, result: str, player_score: int, ai_score: int):
+        self._exec("INSERT INTO ping_pong (user_id, anon_id, result, player_score, ai_score) VALUES (?, ?, ?, ?, ?)",
+                   [user_id, anon_id, result, player_score, ai_score])
+        return self._lastrowid()
+
+    def get_ping_pong_stats(self, anon_id: int) -> dict:
+        rows = self._fetchall("SELECT * FROM ping_pong WHERE anon_id = ?", [anon_id])
+        wins = losses = draws = 0
+        best = 0
+        for r in rows:
+            if r["result"] == "win":
+                wins += 1
+                if r["player_score"] > best:
+                    best = r["player_score"]
+            elif r["result"] == "lose":
+                losses += 1
+            else:
+                draws += 1
+        return {"wins": wins, "losses": losses, "draws": draws, "total": wins + losses + draws, "best": best}
 
     # ──────────── Ideas methods ────────────
 

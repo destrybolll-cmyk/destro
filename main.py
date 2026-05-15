@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import html
 import os
@@ -11,7 +12,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
-from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, WebAppInfo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from config import BOT_TOKEN, ADMIN_ID
@@ -2139,8 +2140,11 @@ BTN_WISDOM = "\U0001f4a1 Мудрость дня"
 BTN_IDEAS = "\U0001f4a1 Идеи пользователей"
 BTN_DIARY = "\U0001f4d6 Дневник Cookie"
 BTN_BCAST = "\U0001f4e2 Рассылка"
+BTN_GAME = "\U0001f3d3 Пинг-Понг"
 BTN_HELP = "❓ Помощь"
 BTN_CANCEL = "❌ Отмена"
+
+GAME_URL = "https://cookie-anon-bot.onrender.com/game"
 
 
 def admin_cmds_keyboard() -> ReplyKeyboardMarkup:
@@ -2155,6 +2159,7 @@ def admin_cmds_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text=BTN_WISDOM), KeyboardButton(text=BTN_ADD_ID)],
             [KeyboardButton(text=BTN_BCAST)],
             [KeyboardButton(text=BTN_DIARY)],
+            [KeyboardButton(text=BTN_GAME)],
             [KeyboardButton(text=BTN_HELP), KeyboardButton(text=BTN_CANCEL)],
         ],
         resize_keyboard=True,
@@ -2163,10 +2168,52 @@ def admin_cmds_keyboard() -> ReplyKeyboardMarkup:
 
 
 BTN_CMDS = {BTN_WRITE, BTN_HISTORY, BTN_STATS, BTN_LIST, BTN_BANNED,
-            BTN_DELETED, BTN_DEL, BTN_BLOCKED, BTN_TTT, BTN_DICE, BTN_WISDOM, BTN_IDEAS, BTN_DIARY, BTN_ADD_ID, BTN_BCAST, BTN_HELP, BTN_CANCEL}
+            BTN_DELETED, BTN_DEL, BTN_BLOCKED, BTN_TTT, BTN_DICE, BTN_WISDOM, BTN_IDEAS, BTN_DIARY, BTN_ADD_ID, BTN_BCAST, BTN_GAME, BTN_HELP, BTN_CANCEL}
 
 
 # ────────────────────────────── Messages ──────────────────────────────
+
+@dp.message(lambda msg: msg.web_app_data is not None)
+async def handle_web_app_data(message: Message):
+    try:
+        data = json.loads(message.web_app_data.data)
+        result = data.get("result")
+        player_score = data.get("playerScore", 0)
+        ai_score = data.get("aiScore", 0)
+        user_id = message.from_user.id
+        anon_id = db.get_anon_id_by_user_id(user_id)
+        if anon_id:
+            db.save_ping_pong(user_id, anon_id, result, player_score, ai_score)
+            stats = db.get_ping_pong_stats(anon_id)
+            if result == "win":
+                msg = f"\U0001f3d3 <b>Пинг-Понг — Победа!</b> \U0001f389\n\n<b>Счёт:</b> {player_score}:{ai_score}\n<b>Всего игр:</b> {stats['total']}\n<b>Побед:</b> {stats['wins']}\n<b>Рекорд:</b> {stats['best']}"
+            elif result == "lose":
+                msg = f"\U0001f3d3 <b>Пинг-Понг — Поражение</b> \U0001f608\n\n<b>Счёт:</b> {player_score}:{ai_score}\n<b>Всего игр:</b> {stats['total']}\n<b>Побед:</b> {stats['wins']}\n<b>Рекорд:</b> {stats['best']}"
+            else:
+                msg = f"\U0001f3d3 <b>Пинг-Понг — Ничья</b> \U0001f91d\n\n<b>Счёт:</b> {player_score}:{ai_score}\n<b>Всего игр:</b> {stats['total']}\n<b>Побед:</b> {stats['wins']}\n<b>Рекорд:</b> {stats['best']}"
+        else:
+            msg = f"\U0001f3d3 <b>Пинг-Понг</b>\n\n<b>Счёт:</b> {player_score}:{ai_score}"
+        play_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="\U0001f3d3 Играть снова", web_app=WebAppInfo(url=GAME_URL))]
+        ])
+        await message.answer(msg, reply_markup=play_kb)
+    except Exception as e:
+        logging.error(f"WebApp data error: {e}")
+        await message.answer("❌ Ошибка обработки результата.")
+
+@dp.message(Command("pingpong"))
+async def cmd_pingpong(message: Message):
+    play_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="\U0001f3d3 Играть в Пинг-Понг", web_app=WebAppInfo(url=GAME_URL))]
+    ])
+    stats = None
+    anon_id = db.get_anon_id_by_user_id(message.from_user.id)
+    if anon_id:
+        stats = db.get_ping_pong_stats(anon_id)
+    text = "\U0001f3d3 <b>Пинг-Понг</b>\n\nНажми кнопку ниже, чтобы запустить игру! Играй против ИИ Cookie."
+    if stats and stats['total'] > 0:
+        text += f"\n\n\U0001f4ca <b>Твоя статистика:</b>\n\U0001f3c6 Побед: {stats['wins']} | \U0001f4a2 Поражений: {stats['losses']}\n\U0001f3af Рекорд: {stats['best']} очков"
+    await message.answer(text, reply_markup=play_kb)
 
 @dp.message()
 async def handle_user_message(message: Message):
@@ -2540,6 +2587,12 @@ async def _handle_user_message(message: Message):
             ])
             await message.answer("\U0001f4d6 <b>Дневник Cookie</b>\n\nЗаписывай свои мысли — пользователи смогут их читать.", reply_markup=diary_kb)
             return
+        if message.text == BTN_GAME:
+            play_kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="\U0001f3d3 Играть в Пинг-Понг", web_app=WebAppInfo(url=GAME_URL))]
+            ])
+            await message.answer("\U0001f3d3 <b>Пинг-Понг</b>\n\nНажми кнопку ниже, чтобы запустить игру!", reply_markup=play_kb)
+            return
         if message.text == BTN_HELP:
             return await cmd_help(message)
         if message.text == BTN_CANCEL:
@@ -2792,11 +2845,14 @@ async def _handle_user_message(message: Message):
     waiting_messages[user_id] = wait_msg.message_id
 
 
-# ────────── Healthcheck HTTP server ────────────────────────────
+# ────────── HTTP server (health + game) ──────────────────────────
 
-async def handle_healthcheck(reader, writer):
-    request = await reader.read(2048)
-    if b"GET /health" in request or b"GET / " in request:
+GAME_HTML_PATH = os.path.join(os.path.dirname(__file__), "public", "game.html")
+
+async def handle_http(reader, writer):
+    request = await reader.read(8192)
+    path = request.split(b" ")[1] if b" " in request else b"/"
+    if path == b"/health" or path == b"/":
         resp = (
             "HTTP/1.1 200 OK\r\n"
             "Content-Type: text/plain\r\n"
@@ -2805,6 +2861,23 @@ async def handle_healthcheck(reader, writer):
             "\r\n"
             "OK"
         )
+    elif path == b"/game" or path == b"/game.html":
+        try:
+            with open(GAME_HTML_PATH, "rb") as f:
+                data = f.read()
+            resp = (
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: text/html; charset=utf-8\r\n"
+                f"Content-Length: {len(data)}\r\n"
+                "Connection: close\r\n"
+                "\r\n"
+            ).encode() + data
+            writer.write(resp)
+            await writer.drain()
+            writer.close()
+            return
+        except FileNotFoundError:
+            resp = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
     else:
         resp = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
     writer.write(resp.encode())
@@ -2812,10 +2885,10 @@ async def handle_healthcheck(reader, writer):
     writer.close()
 
 
-async def run_healthcheck():
+async def run_http_server():
     health_port = int(os.getenv("PORT", 8080))
-    server = await asyncio.start_server(handle_healthcheck, host="0.0.0.0", port=health_port)
-    logging.info(f"\U0001fa7a Healthcheck server on :{health_port}")
+    server = await asyncio.start_server(handle_http, host="0.0.0.0", port=health_port)
+    logging.info(f"\U0001fa7a HTTP server on :{health_port}")
     async with server:
         await server.serve_forever()
 
@@ -2858,7 +2931,7 @@ async def keep_awake_task():
 # ────────────────────────────── Entry ──────────────────────────
 
 async def main():
-    healthcheck_task = asyncio.create_task(run_healthcheck())
+    http_task = asyncio.create_task(run_http_server())
     wisdom_task = asyncio.create_task(daily_wisdom_task())
     keep_awake = asyncio.create_task(keep_awake_task())
     while True:

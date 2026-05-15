@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Пинг-Понг</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0d1117;color:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;overflow:hidden;height:100dvh;display:flex;flex-direction:column;align-items:center;touch-action:none;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+.game-wrapper{position:relative;width:100%;max-width:500px;flex:1;display:flex;flex-direction:column;justify-content:center;align-items:center;padding:8px}
+canvas{width:100%;max-width:500px;aspect-ratio:500/700;background:#161b22;border-radius:16px;box-shadow:0 4px 24px rgba(0,0,0,.4);display:block;touch-action:none}
+.score{display:flex;justify-content:space-between;width:100%;max-width:500px;padding:8px 16px;font-size:18px;font-weight:700}
+.score span{color:#8b949e}
+.score .player{color:#58a6ff}
+.score .ai{color:#f85149}
+.overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(13,17,23,.85);border-radius:16px;z-index:10;gap:12px;padding:20px;text-align:center}
+.overlay h2{font-size:24px;margin-bottom:4px}
+.overlay .score-final{font-size:20px;color:#8b949e;margin-bottom:8px}
+.overlay button{background:#238636;color:#fff;border:none;border-radius:8px;padding:12px 32px;font-size:16px;font-weight:600;cursor:pointer;touch-action:manipulation}
+.overlay button:active{background:#1e7a30}
+.overlay .close-btn{background:#30363d;margin-top:4px}
+.overlay .close-btn:active{background:#21262d}
+.countdown{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:5;font-size:72px;font-weight:900;color:#58a6ff;background:rgba(13,17,23,.7);border-radius:16px}
+.hidden{display:none}
+</style>
+</head>
+<body>
+
+<div class="game-wrapper">
+  <div class="score">
+    <span class="player">Вы: <b id="playerScore">0</b></span>
+    <span id="gameModeText">⚔️ Cookie</span>
+    <span class="ai">Cookie: <b id="aiScore">0</b></span>
+  </div>
+  <div style="position:relative;width:100%;max-width:500px">
+    <canvas id="gameCanvas" width="500" height="700"></canvas>
+    <div id="countdown" class="countdown hidden">3</div>
+    <div id="gameOver" class="overlay hidden">
+      <h2 id="resultTitle">🏓 Игра окончена</h2>
+      <div class="score-final" id="finalScore">0:0</div>
+      <button id="restartBtn">🔄 Начать заново</button>
+      <button id="closeBtn" class="close-btn">❌ Закрыть</button>
+    </div>
+    <div id="startOverlay" class="overlay">
+      <h2>🏓 Пинг-Понг</h2>
+      <p style="color:#8b949e;font-size:14px;max-width:280px">Проведи пальцем вверх/вниз по левой половине экрана, чтобы управлять ракеткой</p>
+      <button id="startBtn">🚀 Играть</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const canvas=document.getElementById('gameCanvas');
+const ctx=canvas.getContext('2d');
+const W=500,H=700;
+const PADDLE_W=10,PADDLE_H=80,BALL_R=8,SPEED_INIT=4;
+const WIN_SCORE=7;
+
+let playerY=H/2-PADDLE_H/2,aiY=H/2-PADDLE_H/2;
+let ballX=W/2,ballY=H/2,bSpeed=SPEED_INIT,bVx=0,bVy=0;
+let playerScore=0,aiScore=0;
+let gameRunning=false,gameStarted=false;
+let countdownVal=3;
+let lastTouchY=null;
+let targetPlayerY=H/2-PADDLE_H/2;
+
+function updateScore(){
+  document.getElementById('playerScore').textContent=playerScore;
+  document.getElementById('aiScore').textContent=aiScore;
+}
+
+function resetBall(){
+  ballX=W/2;ballY=H/2;bSpeed=SPEED_INIT;
+  const angle=(Math.random()*0.8-0.4);
+  const dir=Math.random()>0.5?1:-1;
+  bVx=dir*Math.cos(angle)*bSpeed;
+  bVy=Math.sin(angle)*bSpeed;
+}
+
+function resetGame(){
+  playerY=H/2-PADDLE_H/2;aiY=H/2-PADDLE_H/2;
+  playerScore=0;aiScore=0;updateScore();
+  resetBall();gameRunning=false;gameStarted=false;
+}
+
+function startCountdown(){
+  const cd=document.getElementById('countdown');
+  countdownVal=3;cd.textContent='3';cd.classList.remove('hidden');
+  resetGame();
+  const iv=setInterval(()=>{
+    countdownVal--;
+    if(countdownVal>0)cd.textContent=countdownVal;
+    else{
+      clearInterval(iv);cd.classList.add('hidden');
+      gameRunning=true;gameStarted=true;
+      startGameLoop();
+    }
+  },800);
+}
+
+function endGame(winner){
+  gameRunning=false;gameStarted=false;
+  document.getElementById('finalScore').textContent=`${playerScore}:${aiScore}`;
+  const title=document.getElementById('resultTitle');
+  if(winner==='player')title.textContent='🎉 Победа!';
+  else if(winner==='ai')title.textContent='😈 Поражение';
+  else title.textContent='🤝 Ничья';
+  document.getElementById('gameOver').classList.remove('hidden');
+  // Send result to bot
+  const result=winner==='player'?'win':winner==='ai'?'lose':'draw';
+  if(window.TelegramWebviewProxy||window.Telegram){
+    try{
+      const tg=window.Telegram.WebApp;
+      tg.sendData(JSON.stringify({result,playerScore,aiScore}));
+    }catch(e){}
+  }
+}
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  // Center line
+  ctx.strokeStyle='#30363d';ctx.lineWidth=2;ctx.setLineDash([8,8]);
+  ctx.beginPath();ctx.moveTo(W/2,0);ctx.lineTo(W/2,H);ctx.stroke();ctx.setLineDash([]);
+  // Player paddle
+  ctx.fillStyle='#58a6ff';ctx.fillRect(20,playerY,PADDLE_W,PADDLE_H);
+  // AI paddle
+  ctx.fillStyle='#f85149';ctx.fillRect(W-20-PADDLE_W,aiY,PADDLE_W,PADDLE_H);
+  // Ball
+  ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(ballX,ballY,BALL_R,0,Math.PI*2);ctx.fill();
+}
+
+function update(){
+  if(!gameRunning)return;
+  // Move ball
+  ballX+=bVx;ballY+=bVy;
+  // Wall bounce
+  if(ballY-BALL_R<0){ballY=BALL_R;bVy=-bVy}
+  if(ballY+BALL_R>H){ballY=H-BALL_R;bVy=-bVy}
+  // Player paddle collision
+  if(ballX-BALL_R<20+PADDLE_W&&ballX-BALL_R>20&&ballY>playerY&&ballY<playerY+PADDLE_H){
+    ballX=20+PADDLE_W+BALL_R;bVx=-bVx;
+    bSpeed=Math.min(bSpeed+0.15,8);bVx=Math.sign(bVx)*bSpeed;
+    const rel=(ballY-playerY)/PADDLE_H-0.5;bVy+=rel*1.5;
+  }
+  // AI paddle collision
+  if(ballX+BALL_R>W-20-PADDLE_W&&ballX+BALL_R<W-20&&ballY>aiY&&ballY<aiY+PADDLE_H){
+    ballX=W-20-PADDLE_W-BALL_R;bVx=-bVx;
+    bSpeed=Math.min(bSpeed+0.15,8);bVx=Math.sign(bVx)*bSpeed;
+    const rel=(ballY-aiY)/PADDLE_H-0.5;bVy+=rel*1.5;
+  }
+  // Scoring
+  if(ballX<0){aiScore++;updateScore();if(aiScore>=WIN_SCORE)endGame('ai');else resetBall()}
+  if(ballX>W){playerScore++;updateScore();if(playerScore>=WIN_SCORE)endGame('player');else resetBall()}
+  // AI movement
+  const aiSpeed=3.2;
+  if(ballX>W/2||ballX<W/3){} // AI tracks ball when it's on its side
+  const aiTarget=bVy>0?ballY+PADDLE_H/4:ballY-PADDLE_H/4;
+  if(Math.abs(aiTarget-aiY-PADDLE_H/2)>aiSpeed){
+    aiY+=Math.sign(aiTarget-aiY-PADDLE_H/2)*aiSpeed;
+  }
+  aiY=Math.max(0,Math.min(H-PADDLE_H,aiY));
+  // Player movement (smooth follow)
+  const pSpeed=5;
+  if(Math.abs(targetPlayerY-playerY)>pSpeed){
+    playerY+=Math.sign(targetPlayerY-playerY)*pSpeed;
+  }else playerY=targetPlayerY;
+  playerY=Math.max(0,Math.min(H-PADDLE_H,playerY));
+}
+
+// Touch/Click controls
+function handleMove(y){
+  const rect=canvas.getBoundingClientRect();
+  const scaleY=H/rect.height;
+  targetPlayerY=(y-rect.top)*scaleY-PADDLE_H/2;
+  targetPlayerY=Math.max(0,Math.min(H-PADDLE_H,targetPlayerY));
+}
+
+canvas.addEventListener('touchstart',(e)=>{
+  if(!gameStarted)startCountdown();
+  e.preventDefault();
+  const t=e.touches[0];lastTouchY=t.clientY;
+  handleMove(t.clientY);
+},{passive:false});
+
+canvas.addEventListener('touchmove',(e)=>{
+  e.preventDefault();
+  const t=e.touches[0];lastTouchY=t.clientY;
+  handleMove(t.clientY);
+},{passive:false});
+
+canvas.addEventListener('mousedown',(e)=>{
+  if(!gameStarted)startCountdown();
+  handleMove(e.clientY);
+});
+canvas.addEventListener('mousemove',(e)=>{
+  if(e.buttons&1)handleMove(e.clientY);
+});
+
+// Buttons
+document.getElementById('startBtn').addEventListener('click',()=>{
+  document.getElementById('startOverlay').classList.add('hidden');
+  startCountdown();
+});
+document.getElementById('restartBtn').addEventListener('click',()=>{
+  document.getElementById('gameOver').classList.add('hidden');
+  startCountdown();
+});
+document.getElementById('closeBtn').addEventListener('click',()=>{
+  if(window.TelegramWebviewProxy||window.Telegram){
+    try{window.Telegram.WebApp.close()}catch(e){}
+  }
+});
+
+function gameLoop(){
+  update();draw();requestAnimationFrame(gameLoop);
+}
+
+function startGameLoop(){
+  gameLoop();
+}
+
+// Init Telegram WebApp
+try{
+  if(window.TelegramWebviewProxy||window.Telegram){
+    const tg=window.Telegram.WebApp;
+    tg.ready();tg.expand();
+  }
+}catch(e){}
+
+draw();
+</script>
+</body>
+</html>
