@@ -288,25 +288,6 @@ class Database:
             WHERE m.timestamp >= datetime('now', ?) ORDER BY m.timestamp ASC""",
             [f"-{minutes} minutes"])
 
-    def get_all_messages(self, page: int = 1, per_page: int = 15, date_filter: str = None):
-        offset = (page - 1) * per_page
-        where = ""
-        params = []
-        if date_filter == "today":
-            where = " WHERE date(m.timestamp) = date('now')"
-        elif date_filter == "yesterday":
-            where = " WHERE date(m.timestamp) = date('now', '-1 day')"
-        elif date_filter:
-            where = " WHERE date(m.timestamp) = date(?)"
-            params = [date_filter]
-        rows = self._fetchall(
-            f"""SELECT m.*, u.first_name, u.username FROM messages m
-            LEFT JOIN users u ON m.user_id = u.user_id{where}
-            ORDER BY m.timestamp ASC LIMIT ? OFFSET ?""", params + [per_page, offset])
-        total = self._fetchval(f"SELECT COUNT(*) FROM messages m{where}", params)
-        total_pages = max(1, (total + per_page - 1) // per_page)
-        return rows, total_pages
-
     def get_user_messages(self, anon_id: int, page: int = 1, per_page: int = 20, date_filter: str = None):
         where = "messages.anon_id = ?"
         params = [anon_id]
