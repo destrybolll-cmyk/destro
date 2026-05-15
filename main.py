@@ -37,7 +37,8 @@ user_spam_warnings: dict[int, int] = {}
 # Ideas tracking
 user_telling_idea: set[int] = set()
 admin_commenting_idea: int | None = None
-ban_user_step: int | None = None  # anon_id of user being banned (awaiting reason)
+ban_user_step: int | None = None
+admin_writing_diary: bool = False  # anon_id of user being banned (awaiting reason)
 
 
 async def delete_waiting(target_user_id: int):
@@ -600,6 +601,8 @@ async def cmd_start(message: Message):
         "\U0001f3ae <b>Хочешь сыграть в крестики-нолики?</b>\n"
         "Напиши \u00abигра\u00bb или \u00abttt\u00bb и я передам вызов!\n\n"
         f"\U0001f4a1 <b>Мудрость дня:</b>\n{wisdom_of_the_day(anon_id)}\n\n"
+        "\U0001f4d6 <b>Дневник Cookie</b>\n"
+        "Напиши <b>«дневник»</b> чтобы читать мысли Cookie!\n\n"
         "Напиши <b>«мудрость»</b> чтобы увидеть новую каждый день!",
         reply_markup=start_kb,
     )
@@ -688,7 +691,7 @@ async def cmd_help(message: Message):
 async def cmd_cancel(message: Message):
     if not is_admin(message.from_user.id):
         return
-    global admin_pending_reply, write_flow_step, write_flow_anon_id, add_user_step, rename_anon_id, admin_commenting_idea, ban_user_step
+    global admin_pending_reply, write_flow_step, write_flow_anon_id, add_user_step, rename_anon_id, admin_commenting_idea, ban_user_step, admin_writing_diary
     admin_pending_reply = None
     write_flow_step = None
     write_flow_anon_id = None
@@ -696,6 +699,7 @@ async def cmd_cancel(message: Message):
     rename_anon_id = None
     admin_commenting_idea = None
     ban_user_step = None
+    admin_writing_diary = False
     # Cancel any pending TTT challenge
     pending = db.get_player_game(ADMIN_ANON_ID, statuses=("pending",))
     if pending:
@@ -1068,7 +1072,7 @@ async def handle_callback(callback: CallbackQuery):
 
 
 async def _handle_callback(callback: CallbackQuery):
-    global admin_pending_reply, write_flow_step, write_flow_anon_id, rename_anon_id, admin_commenting_idea, ban_user_step
+    global admin_pending_reply, write_flow_step, write_flow_anon_id, rename_anon_id, admin_commenting_idea, ban_user_step, admin_writing_diary
 
     parts = callback.data.split(":")
     action = parts[0]
@@ -1078,6 +1082,7 @@ async def _handle_callback(callback: CallbackQuery):
                        "appeal", "appeal_accept", "appeal_decline",
                        "dice_accept", "dice_decline", "dice_rematch", "dice_my_stats", "dice_pgn",
                        "wisdom", "user_ttt", "user_idea", "idea_accept", "idea_reject", "idea_comment",
+                       "diary_read", "diary_pgn",
                         "none"):
             pass
         else:
@@ -1593,6 +1598,80 @@ async def _handle_callback(callback: CallbackQuery):
         )
         return
 
+    elif action == "diary_write":
+        if not is_admin(callback.from_user.id):
+            await callback.answer()
+            return
+        admin_writing_diary = True
+        await callback.answer()
+        await callback.message.answer(
+            "\U0001f4d6 <b>Напишите запись в дневник</b>\n\n"
+            "Пользователи смогут прочитать это.\n"
+            "/cancel — отменить"
+        )
+        return
+
+    elif action == "diary_read":
+        page = int(parts[1])
+        await callback.answer()
+        entries, total_pages = db.get_diary_entries(page)
+        if not entries:
+            await callback.message.answer("\U0001f4d6 <b>Дневник пока пуст.</b>")
+            return
+        lines = [f"\U0001f4d6 <b>Дневник Cookie</b> (стр. {page}/{total_pages}):\n"]
+        for e in entries:
+            ts = local_time(e["created_at"])
+            lines.append(f"<b>{ts}</b>")
+            lines.append(f"{esc(e['text'][:500])}")
+            lines.append("")
+        text = "\n".join(lines)
+        if len(text) > 4000:
+            text = text[:4000] + "\n\n..."
+        kb_rows = []
+        if total_pages > 1:
+            nav = []
+            if page > 1:
+                nav.append(InlineKeyboardButton(text="\u2b05\ufe0f", callback_data=f"diary_pgn:{page - 1}"))
+            nav.append(InlineKeyboardButton(text=f"\U0001f4c5 {page}/{total_pages}", callback_data="none"))
+            if page < total_pages:
+                nav.append(InlineKeyboardButton(text="\u27a1\ufe0f", callback_data=f"diary_pgn:{page + 1}"))
+            kb_rows.append(nav)
+        kb = InlineKeyboardMarkup(inline_keyboard=kb_rows) if kb_rows else None
+        try:
+            await callback.message.edit_text(text, reply_markup=kb)
+        except Exception:
+            await callback.message.answer(text, reply_markup=kb)
+        return
+
+    elif action == "diary_pgn":
+        page = int(parts[1])
+        await callback.answer()
+        entries, total_pages = db.get_diary_entries(page)
+        if not entries:
+            await callback.message.edit_text("\U0001f4d6 <b>Дневник пока пуст.</b>")
+            return
+        lines = [f"\U0001f4d6 <b>Дневник Cookie</b> (стр. {page}/{total_pages}):\n"]
+        for e in entries:
+            ts = local_time(e["created_at"])
+            lines.append(f"<b>{ts}</b>")
+            lines.append(f"{esc(e['text'][:500])}")
+            lines.append("")
+        text = "\n".join(lines)
+        if len(text) > 4000:
+            text = text[:4000] + "\n\n..."
+        kb_rows = []
+        if total_pages > 1:
+            nav = []
+            if page > 1:
+                nav.append(InlineKeyboardButton(text="\u2b05\ufe0f", callback_data=f"diary_pgn:{page - 1}"))
+            nav.append(InlineKeyboardButton(text=f"\U0001f4c5 {page}/{total_pages}", callback_data="none"))
+            if page < total_pages:
+                nav.append(InlineKeyboardButton(text="\u27a1\ufe0f", callback_data=f"diary_pgn:{page + 1}"))
+            kb_rows.append(nav)
+        kb = InlineKeyboardMarkup(inline_keyboard=kb_rows) if kb_rows else None
+        await callback.message.edit_text(text, reply_markup=kb)
+        return
+
     elif action == "wisdom":
         if is_admin(callback.from_user.id):
             anon_id = ADMIN_ANON_ID
@@ -1842,6 +1921,7 @@ BTN_TTT = "\U0001f3ae Крестики-нолики"
 BTN_DICE = "\U0001f3b2 Везение"
 BTN_WISDOM = "\U0001f4a1 Мудрость дня"
 BTN_IDEAS = "\U0001f4a1 Идеи пользователей"
+BTN_DIARY = "\U0001f4d6 Дневник Cookie"
 BTN_BCAST = "\U0001f4e2 Рассылка"
 BTN_HELP = "❓ Помощь"
 BTN_CANCEL = "❌ Отмена"
@@ -1858,6 +1938,7 @@ def admin_cmds_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text=BTN_DEL), KeyboardButton(text=BTN_IDEAS)],
             [KeyboardButton(text=BTN_WISDOM), KeyboardButton(text=BTN_ADD_ID)],
             [KeyboardButton(text=BTN_BCAST)],
+            [KeyboardButton(text=BTN_DIARY)],
             [KeyboardButton(text=BTN_HELP), KeyboardButton(text=BTN_CANCEL)],
         ],
         resize_keyboard=True,
@@ -1866,7 +1947,7 @@ def admin_cmds_keyboard() -> ReplyKeyboardMarkup:
 
 
 BTN_CMDS = {BTN_WRITE, BTN_HISTORY, BTN_STATS, BTN_LIST, BTN_BANNED,
-            BTN_DELETED, BTN_DEL, BTN_BLOCKED, BTN_TTT, BTN_DICE, BTN_WISDOM, BTN_IDEAS, BTN_ADD_ID, BTN_BCAST, BTN_HELP, BTN_CANCEL}
+            BTN_DELETED, BTN_DEL, BTN_BLOCKED, BTN_TTT, BTN_DICE, BTN_WISDOM, BTN_IDEAS, BTN_DIARY, BTN_ADD_ID, BTN_BCAST, BTN_HELP, BTN_CANCEL}
 
 
 # ────────────────────────────── Messages ──────────────────────────────
@@ -1892,7 +1973,7 @@ async def handle_user_message(message: Message):
 
 
 async def _handle_user_message(message: Message):
-    global admin_pending_reply, write_flow_step, write_flow_anon_id, add_user_step, rename_anon_id, admin_commenting_idea, ban_user_step
+    global admin_pending_reply, write_flow_step, write_flow_anon_id, add_user_step, rename_anon_id, admin_commenting_idea, ban_user_step, admin_writing_diary
     user_id = message.from_user.id
 
     if is_admin(user_id):
@@ -2091,6 +2172,36 @@ async def _handle_user_message(message: Message):
                 await message.answer("❌ Комментарий не может быть пустым.")
             return
 
+        if admin_writing_diary:
+            if message.text == BTN_CANCEL or message.text == "/cancel":
+                admin_writing_diary = False
+                await cmd_cancel(message)
+                return
+            entry_text = (message.text or "").strip()
+            if entry_text:
+                admin_writing_diary = False
+                entry_id = db.add_diary_entry(entry_text)
+                await message.answer(f"✅ Запись #{entry_id} добавлена в дневник!")
+                # Notify all users about new entry
+                users = db.get_all_users()
+                sent = 0
+                for u in users:
+                    try:
+                        await bot.send_message(
+                            u["user_id"],
+                            f"\U0001f4d6 <b>Новая запись в дневнике Cookie!</b>\n\n"
+                            f"{esc(entry_text[:100])}{'...' if len(entry_text) > 100 else ''}\n\n"
+                            f"Напиши «дневник» чтобы прочитать полностью."
+                        )
+                        sent += 1
+                        await asyncio.sleep(0.05)
+                    except Exception:
+                        pass
+                await message.answer(f"\U0001f4e2 Уведомление отправлено {sent} пользователям.")
+            else:
+                await message.answer("❌ Запись не может быть пустой.")
+            return
+
         if message.text == BTN_WRITE:
             text, markup = paginated_users_list(1)
             await message.answer("\U0001f447 <b>Выбери пользователя</b> \u2014 нажми \u270d\ufe0f рядом с именем:", reply_markup=markup)
@@ -2145,6 +2256,13 @@ async def _handle_user_message(message: Message):
             if len(text) > 4000:
                 text = text[:4000] + "\n\n..."
             await message.answer(text)
+            return
+        if message.text == BTN_DIARY:
+            diary_kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="\u270f\ufe0f Написать запись", callback_data="diary_write"),
+                 InlineKeyboardButton(text="\U0001f4d6 Читать дневник", callback_data="diary_read:1")],
+            ])
+            await message.answer("\U0001f4d6 <b>Дневник Cookie</b>\n\nЗаписывай свои мысли — пользователи смогут их читать.", reply_markup=diary_kb)
             return
         if message.text == BTN_HELP:
             return await cmd_help(message)
@@ -2247,6 +2365,30 @@ async def _handle_user_message(message: Message):
     user_msg_lower = user_msg_text
     if any(kw in user_msg_lower for kw in {"мудрость", "цитата", "мудрости"}):
         await message.answer(f"\U0001f4a1 <b>Мудрость дня</b>\n\n{wisdom_of_the_day(anon_id)}")
+        return
+
+    # ── Diary keyword detection ──
+    if any(kw in user_msg_lower for kw in {"дневник", "дневник cookie", "дневник cookies"}):
+        entries, total_pages = db.get_diary_entries(1)
+        if not entries:
+            await message.answer("\U0001f4d6 <b>Дневник Cookie пока пуст.</b>")
+            return
+        lines = [f"\U0001f4d6 <b>Дневник Cookie</b> (стр. 1/{total_pages}):\n"]
+        for e in entries:
+            ts = local_time(e["created_at"])
+            lines.append(f"<b>{ts}</b>")
+            lines.append(f"{esc(e['text'][:500])}")
+            lines.append("")
+        text = "\n".join(lines)
+        if len(text) > 4000:
+            text = text[:4000] + "\n\n..."
+        kb_rows = []
+        if total_pages > 1:
+            kb_rows.append([
+                InlineKeyboardButton(text="\u27a1\ufe0f Далее", callback_data="diary_pgn:2")
+            ])
+        kb = InlineKeyboardMarkup(inline_keyboard=kb_rows) if kb_rows else None
+        await message.answer(text, reply_markup=kb)
         return
 
     # ── User telling an idea ──

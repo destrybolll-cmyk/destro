@@ -168,6 +168,11 @@ class Database:
                 admin_comment TEXT DEFAULT '', is_top INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )''',
+            '''CREATE TABLE IF NOT EXISTS diary (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                text TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )''',
         ]:
             self._exec(sql)
     # ──────────── User methods ────────────
@@ -388,3 +393,16 @@ class Database:
                 wins += 1
             else: losses += 1
         return {"wins": wins, "losses": losses, "draws": draws, "total": wins + losses + draws, "opponents": len(opponents)}
+
+    # ──────────── Diary methods ────────────
+
+    def add_diary_entry(self, text: str) -> int:
+        self._exec("INSERT INTO diary (text) VALUES (?)", [text])
+        return self._lastrowid()
+
+    def get_diary_entries(self, page: int = 1, per_page: int = 5):
+        offset = (page - 1) * per_page
+        rows = self._fetchall("SELECT * FROM diary ORDER BY id DESC LIMIT ? OFFSET ?", [per_page, offset])
+        total = self._fetchval("SELECT COUNT(*) FROM diary")
+        total_pages = max(1, (total + per_page - 1) // per_page)
+        return rows, total_pages
