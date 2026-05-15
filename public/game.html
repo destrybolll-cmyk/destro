@@ -13,28 +13,25 @@ canvas{width:100%;max-width:500px;aspect-ratio:500/700;background:#161b22;border
 .score span{color:#8b949e}
 .score .player{color:#58a6ff}
 .score .ai{color:#f85149}
-.overlay,.lobby{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(13,17,23,.85);border-radius:16px;z-index:10;gap:12px;padding:20px;text-align:center}
-.overlay h2,.lobby h2{font-size:24px;margin-bottom:4px}
+.overlay,.lobby{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;background:rgba(13,17,23,.85);border-radius:16px;z-index:10;gap:8px;padding:20px;text-align:center}
+.overlay h2,.lobby h2{font-size:22px;margin-bottom:4px}
 .overlay .score-final{font-size:20px;color:#8b949e;margin-bottom:8px}
-.overlay button,.lobby button{background:#238636;color:#fff;border:none;border-radius:8px;padding:12px 32px;font-size:16px;font-weight:600;cursor:pointer;touch-action:manipulation;width:100%;max-width:280px}
-.overlay button:active,.lobby button:active{background:#1e7a30}
-.overlay .close-btn,.lobby .secondary{background:#30363d}
-.overlay .close-btn:active,.lobby .secondary:active{background:#21262d}
+.btn{background:#238636;color:#fff;border:none;border-radius:8px;padding:10px 24px;font-size:15px;font-weight:600;cursor:pointer;touch-action:manipulation;width:100%;max-width:280px}
+.btn:active{background:#1e7a30}
+.btn-secondary{background:#30363d}
+.btn-secondary:active{background:#21262d}
 .lobby input{background:#21262d;color:#fff;border:1px solid #30363d;border-radius:8px;padding:10px 16px;font-size:16px;width:100%;max-width:280px;text-align:center;outline:none}
 .lobby input:focus{border-color:#58a6ff}
 .lobby .hint{color:#8b949e;font-size:13px;max-width:280px}
-.lobby .sep{color:#30363d;font-size:14px;margin:4px 0}
+.lobby .sep{color:#30363d;font-size:13px;margin:2px 0}
+.user-list{width:100%;max-width:320px;max-height:260px;overflow-y:auto;margin:4px 0;display:none;flex-direction:column;gap:3px}
+.user-list.show{display:flex}
+.user-item{background:#21262d;border:none;border-radius:6px;padding:8px 12px;color:#c9d1d9;font-size:14px;cursor:pointer;text-align:left;display:flex;gap:8px;align-items:center}
+.user-item:active{background:#30363d}
+.user-item .id{color:#8b949e;font-size:12px;min-width:24px}
+.user-item .name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.back-btn{background:transparent;border:none;color:#58a6ff;font-size:13px;cursor:pointer;padding:8px}
 .countdown{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:5;font-size:72px;font-weight:900;color:#58a6ff;background:rgba(13,17,23,.7);border-radius:16px}
-.user-list{position:absolute;inset:0;display:flex;flex-direction:column;background:rgba(13,17,23,.95);border-radius:16px;z-index:20;padding:16px}
-.user-list h2{font-size:20px;margin-bottom:8px;text-align:center}
-.user-list .search{background:#21262d;color:#fff;border:1px solid #30363d;border-radius:8px;padding:8px 12px;font-size:14px;width:100%;margin-bottom:8px;outline:none}
-.user-list .search:focus{border-color:#58a6ff}
-.user-list .items{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:4px}
-.user-list .items .u{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:#161b22;border-radius:8px;cursor:pointer}
-.user-list .items .u:active{background:#1c2333}
-.user-list .items .u .name{font-size:14px}
-.user-list .items .u .id{color:#8b949e;font-size:12px}
-.user-list .back{background:#30363d;color:#fff;border:none;border-radius:8px;padding:8px;font-size:14px;cursor:pointer;margin-top:8px}
 .hidden{display:none}
 </style>
 </head>
@@ -52,25 +49,21 @@ canvas{width:100%;max-width:500px;aspect-ratio:500/700;background:#161b22;border
     <div id="gameOver" class="overlay hidden">
       <h2 id="resultTitle">🏓 Игра окончена</h2>
       <div class="score-final" id="finalScore">0:0</div>
-      <button id="closeBtn" class="close-btn">❌ Закрыть</button>
+      <button id="closeBtn" class="btn btn-secondary">❌ Закрыть</button>
     </div>
     <div id="waitingOverlay" class="overlay hidden">
-      <h2>⏳ Ожидание ответа...</h2>
-      <p style="color:#8b949e" id="waitingText">Подключаемся к игре</p>
+      <h2>⏳ Ожидание соперника...</h2>
+      <p style="color:#8b949e;font-size:14px">Подключаемся к игре</p>
     </div>
     <div id="lobby" class="lobby">
       <h2>🏓 Пинг-Понг</h2>
-      <button id="btnAI">🤖 Против AI</button>
-      <div class="sep">— или —</div>
-      <button id="btnCookie">👑 Против Cookie</button>
-      <div class="sep">— или —</div>
-      <button id="btnUserList" class="secondary">👥 Выбрать пользователя</button>
-    </div>
-    <div id="userListPanel" class="user-list hidden">
-      <h2>👥 Выбери соперника</h2>
-      <input class="search" id="userSearch" placeholder="Поиск по имени или ID..." autocomplete="off">
-      <div class="items" id="userItems"></div>
-      <button class="back" id="userListBack">← Назад</button>
+      <div class="sep">Выбери режим:</div>
+      <button id="btnAI" class="btn">🤖 Против AI</button>
+      <button id="btnCookie" class="btn">👑 Против Cookie</button>
+      <div class="sep">— или вызови пользователя —</div>
+      <button id="btnList" class="btn btn-secondary">📋 Выбрать из списка</button>
+      <div id="userList" class="user-list"></div>
+      <button id="backToMenu" class="back-btn hidden">← Назад</button>
     </div>
   </div>
 </div>
@@ -106,93 +99,29 @@ function sendToBot(data){
   if(tg){try{tg.sendData(JSON.stringify(data))}catch(e){}}
 }
 
-// Init
+function sendGameResult(winner){
+  gameRunning=false;gameStarted=false;
+  document.getElementById('finalScore').textContent=`${playerScore}:${aiScore}`;
+  const title=document.getElementById('resultTitle');
+  let result;
+  if(winner==='player'){title.textContent='🎉 Победа!';result='win'}
+  else if(winner==='ai'){title.textContent='😈 Поражение';result='lose'}
+  else{title.textContent='🤝 Ничья';result='draw'}
+  document.getElementById('gameOver').classList.remove('hidden');
+  sendToBot({result,playerScore,aiScore});
+}
+
 if(isMultiplayer){
   document.getElementById('lobby').classList.add('hidden');
   document.getElementById('gameModeText').textContent='🏓 Cookie';
   document.getElementById('opponentLabel').innerHTML='Cookie: <b id="aiScore">0</b>';
   document.getElementById('waitingOverlay').classList.remove('hidden');
   connectWs();
-}else{
+} else {
   document.getElementById('gameModeText').textContent='⚔️ Режим';
   document.getElementById('opponentLabel').innerHTML='AI: <b id="aiScore">0</b>';
 }
 
-// ─── Lobby buttons ───
-document.getElementById('btnAI').addEventListener('click',()=>{
-  document.getElementById('lobby').classList.add('hidden');
-  startAIGame();
-});
-document.getElementById('btnCookie').addEventListener('click',()=>{
-  sendToBot({action:'challenge'});
-  document.getElementById('lobby').classList.add('hidden');
-  document.getElementById('waitingText').textContent='Вызов отправлен Cookie...';
-  document.getElementById('waitingOverlay').classList.remove('hidden');
-});
-document.getElementById('btnUserList').addEventListener('click',()=>{
-  document.getElementById('lobby').classList.add('hidden');
-  document.getElementById('userListPanel').classList.remove('hidden');
-  loadUserList();
-});
-document.getElementById('userListBack').addEventListener('click',()=>{
-  document.getElementById('userListPanel').classList.add('hidden');
-  document.getElementById('lobby').classList.remove('hidden');
-});
-
-let allUsers=[];
-
-async function loadUserList(){
-  const container=document.getElementById('userItems');
-  container.innerHTML='<p style="color:#8b949e">Загрузка...</p>';
-  try{
-    const resp=await fetch('/api/users');
-    allUsers=await resp.json();
-    renderUserList('');
-  }catch(e){
-    container.innerHTML='<p style="color:#f85149">Ошибка загрузки</p>';
-  }
-}
-
-function renderUserList(query){
-  const container=document.getElementById('userItems');
-  const q=query.toLowerCase();
-  const filtered=allUsers.filter(u=>{
-    const name=(u.name||'').toLowerCase();
-    const id=String(u.id);
-    return name.includes(q)||id.includes(q)||u.username.toLowerCase().includes(q);
-  });
-  if(filtered.length===0){
-    container.innerHTML='<p style="color:#8b949e;text-align:center">Нет пользователей</p>';
-    return;
-  }
-  container.innerHTML='';
-  filtered.forEach(u=>{
-    const div=document.createElement('div');
-    div.className='u';
-    div.innerHTML=`<span class="name">${escHtml(u.name)}</span><span class="id">#${u.id}</span>`;
-    div.addEventListener('click',()=>challengeUser(u.id));
-    container.appendChild(div);
-  });
-}
-
-function escHtml(s){
-  const d=document.createElement('div');
-  d.textContent=s;
-  return d.innerHTML;
-}
-
-document.getElementById('userSearch').addEventListener('input',(e)=>{
-  renderUserList(e.target.value);
-});
-
-function challengeUser(anonId){
-  document.getElementById('userListPanel').classList.add('hidden');
-  document.getElementById('waitingText').textContent=`Вызов отправлен пользователю #${anonId}...`;
-  document.getElementById('waitingOverlay').classList.remove('hidden');
-  sendToBot({action:'challenge',user_anon_id:anonId});
-}
-
-// ─── Multiplayer WebSocket ───
 function connectWs(){
   const proto=window.location.protocol==='https:'?'wss:':'ws:';
   const url=`${proto}//${window.location.host}/ws?room=${roomId}&side=${side}`;
@@ -234,7 +163,79 @@ function updateScore(){
   document.getElementById('aiScore').textContent=aiScore;
 }
 
-// ─── AI Game ───
+// ─── Lobby buttons ───
+document.getElementById('btnAI').addEventListener('click',()=>{
+  document.getElementById('lobby').classList.add('hidden');
+  startAIGame();
+});
+document.getElementById('btnCookie').addEventListener('click',()=>{
+  sendToBot({action:'challenge'});
+  document.getElementById('lobby').classList.add('hidden');
+  document.getElementById('waitingOverlay').querySelector('h2').textContent='⏳ Вызов отправлен Cookie...';
+  document.getElementById('waitingOverlay').classList.remove('hidden');
+});
+
+// User list
+const userListEl=document.getElementById('userList');
+const backBtn=document.getElementById('backToMenu');
+let usersCache=null;
+
+document.getElementById('btnList').addEventListener('click',async()=>{
+  document.getElementById('btnList').classList.add('hidden');
+  userListEl.innerHTML='<div style="color:#8b949e;padding:8px">Загрузка...</div>';
+  userListEl.classList.add('show');
+  backBtn.classList.remove('hidden');
+  if(!usersCache){
+    try{
+      const r=await fetch('/api/users');
+      usersCache=await r.json();
+    }catch(e){
+      userListEl.innerHTML='<div style="color:#f85149;padding:8px">Ошибка загрузки</div>';
+      return;
+    }
+  }
+  renderUserList(usersCache);
+});
+
+backBtn.addEventListener('click',()=>{
+  userListEl.classList.remove('show');
+  userListEl.innerHTML='';
+  document.getElementById('btnList').classList.remove('hidden');
+  backBtn.classList.add('hidden');
+  document.querySelector('.sep:last-of-type').style.display='';
+});
+
+function renderUserList(users){
+  if(!users||users.length===0){
+    userListEl.innerHTML='<div style="color:#8b949e;padding:8px">Нет пользователей</div>';
+    return;
+  }
+  let html='';
+  for(const u of users){
+    html+=`<button class="user-item" data-id="${u.id}">
+      <span class="id">#${u.id}</span>
+      <span class="name">${escHtml(u.name)}</span>
+      <span style="color:#58a6ff;font-size:13px">🎯</span>
+    </button>`;
+  }
+  userListEl.innerHTML=html;
+  userListEl.querySelectorAll('.user-item').forEach(el=>{
+    el.addEventListener('click',()=>{
+      const id=parseInt(el.dataset.id);
+      sendToBot({action:'challenge',user_anon_id:id});
+      userListEl.classList.remove('show');
+      document.getElementById('btnList').classList.remove('hidden');
+      backBtn.classList.add('hidden');
+      document.getElementById('lobby').classList.add('hidden');
+      document.getElementById('waitingOverlay').querySelector('h2').textContent=`⏳ Вызов отправлен пользователю #${id}...`;
+      document.getElementById('waitingOverlay').classList.remove('hidden');
+    });
+  });
+}
+
+function escHtml(s){return String(s).replace(/[&<>"]/g,c=>{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]||c)}
+
+// ─── Game loop ───
 function startAIGame(){
   playerScore=0;aiScore=0;updateScore();
   playerY=H/2-PADDLE_H/2;aiY=H/2-PADDLE_H/2;
@@ -276,7 +277,8 @@ function draw(){
 }
 
 function update(){
-  if(!gameRunning||isMultiplayer)return;
+  if(!gameRunning)return;
+  if(isMultiplayer)return;
   ballX+=bVx;ballY+=bVy;
   if(ballY-BALL_R<0){ballY=BALL_R;bVy=-bVy}
   if(ballY+BALL_R>H){ballY=H-BALL_R;bVy=-bVy}
@@ -327,21 +329,9 @@ canvas.addEventListener('mousemove',(e)=>{if(e.buttons&1)handleMove(e.clientY)})
 
 document.getElementById('closeBtn').addEventListener('click',()=>{if(tg)try{tg.close()}catch(e){}});
 
-function sendGameResult(winner){
-  gameRunning=false;gameStarted=false;
-  document.getElementById('finalScore').textContent=`${playerScore}:${aiScore}`;
-  const title=document.getElementById('resultTitle');
-  let result;
-  if(winner==='player'){title.textContent='🎉 Победа!';result='win'}
-  else if(winner==='ai'){title.textContent='😈 Поражение';result='lose'}
-  else{title.textContent='🤝 Ничья';result='draw'}
-  document.getElementById('gameOver').classList.remove('hidden');
-  sendToBot({result,playerScore,aiScore});
-}
-
 function gameLoop(){update();draw();if(gameRunning)requestAnimationFrame(gameLoop)}
+
 draw();
 </script>
 </body>
 </html>
-

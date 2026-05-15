@@ -3169,7 +3169,7 @@ async def handle_game(request):
 
 async def handle_api_users(request):
     users = db.get_all_users()
-    data = [{"id": u["id"], "name": u["first_name"] or f"#{u['id']}", "username": u.get("username") or ""} for u in users if not u.get("is_deleted")]
+    data = [{"id": u["id"], "name": u["first_name"] or f"#{u['id']}"} for u in users if u["id"] != 1]
     return web.json_response(data)
 
 async def handle_websocket(request):
