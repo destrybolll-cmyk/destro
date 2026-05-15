@@ -310,14 +310,12 @@ class Database:
             params.append(date_filter)
         total = self._fetchval(f"SELECT COUNT(*) FROM messages WHERE {where}", params)
         total_pages = max(1, (total + per_page - 1) // per_page)
-        # ASC order with page 1 = most recent page (reverse offset)
-        offset = max(0, total - page * per_page)
-        limit = min(per_page, total - offset) if offset < total else per_page
+        offset = (page - 1) * per_page
         rows = self._fetchall(
             f"""SELECT messages.*, u.first_name, u.username FROM messages
             LEFT JOIN users u ON messages.user_id = u.user_id
             WHERE {where} ORDER BY messages.timestamp ASC LIMIT ? OFFSET ?""",
-            params + [limit, offset])
+            params + [per_page, offset])
         uid_row = self._fetchone("SELECT user_id FROM users WHERE id = ?", [anon_id])
         return rows, total_pages, uid_row["user_id"] if uid_row else None
 
