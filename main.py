@@ -2318,28 +2318,32 @@ async def handle_web_app_data(message: Message):
 
         # Challenge from within the game
         if action == "challenge":
-            user_anon_id = data.get("user_anon_id")
+            target_anon_id = data.get("user_anon_id")
             challenger_id = message.from_user.id
-            if not user_anon_id:
-                # No target specified → challenge Cookie (admin)
-                anon_id = db.get_anon_id_by_user_id(challenger_id)
-                if not anon_id:
-                    await message.answer("❌ Ты не найден в базе. Напиши боту любое сообщение сначала.")
-                    return
-                accept_kb = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="✅ Принять", callback_data=f"pong_accept:{anon_id}"),
-                     InlineKeyboardButton(text="❌ Отклонить", callback_data=f"pong_decline:{anon_id}")]
-                ])
-                await bot.send_message(ADMIN_ID, f"\U0001f3d3 <b>Пинг-Понг!</b>\n\nПользователь #{anon_id} хочет сыграть с тобой!", reply_markup=accept_kb)
-                await message.answer("⏳ Ожидаем ответа от Cookie...")
+            challenger_anon = db.get_anon_id_by_user_id(challenger_id)
+            if not challenger_anon:
+                await message.answer("❌ Ты не найден в базе. Напиши боту любое сообщение сначала.")
                 return
-                # Admin challenges user directly
-                user = db.get_user_by_anon(user_anon_id)
-                if not user or row_get(user, "is_deleted"):
-                    await message.answer(f"❌ Пользователь #{user_anon_id} не найден.")
+
+            if not target_anon_id:
+                # No target specified → challenge Cookie (admin)
+                accept_kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="✅ Принять", callback_data=f"pong_accept:{challenger_anon}"),
+                     InlineKeyboardButton(text="❌ Отклонить", callback_data=f"pong_decline:{challenger_anon}")]
+                ])
+                await bot.send_message(ADMIN_ID, f"\U0001f3d3 <b>Пинг-Понг!</b>\n\nПользователь #{challenger_anon} хочет сыграть с тобой!", reply_markup=accept_kb)
+                await message.answer("⏳ Ожидаем ответа от Cookie...")
+            else:
+                # Challenge a specific anon_id
+                if target_anon_id == challenger_anon:
+                    await message.answer("❌ Нельзя играть против самого себя!")
                     return
-                target_user_id = user["user_id"]
-                room_id = f"pong_{user_anon_id}_{int(time.time())}"
+                target = db.get_user_by_anon(target_anon_id)
+                if not target or row_get(target, "is_deleted"):
+                    await message.answer(f"❌ Пользователь #{target_anon_id} не найден.")
+                    return
+                target_user_id = target["user_id"]
+                room_id = f"pong_{challenger_anon}_{target_anon_id}_{int(time.time())}"
                 PONG_ROOMS[room_id] = {
                     "id": room_id, "p1_ws": None, "p2_ws": None,
                     "p1_y": 310, "p2_y": 310,
@@ -2348,31 +2352,18 @@ async def handle_web_app_data(message: Message):
                     "p1_score": 0, "p2_score": 0,
                     "running": False, "loop_task": None,
                 }
-                admin_link = f"https://cookie-anon-bot.onrender.com/game?room={room_id}&side=left"
-                user_link = f"https://cookie-anon-bot.onrender.com/game?room={room_id}&side=right"
-                await message.answer(f"\U0001f3d3 Вызов отправлен пользователю #{user_anon_id}!")
+                p1_link = f"https://cookie-anon-bot.onrender.com/game?room={room_id}&side=left"
+                p2_link = f"https://cookie-anon-bot.onrender.com/game?room={room_id}&side=right"
+                await message.answer(f"\U0001f3d3 Вызов отправлен пользователю #{target_anon_id}!")
                 try:
-                    await bot.send_message(target_user_id, f"\U0001f3d3 <b>{ADMIN_NAME} вызвал тебя на Пинг-Понг!</b>", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text="\U0001f3d3 Открыть игру", web_app=WebAppInfo(url=user_link))]
+                    await bot.send_message(target_user_id, f"\U0001f3d3 <b>#{challenger_anon} вызвал тебя на Пинг-Понг!</b>", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="\U0001f3d3 Открыть игру", web_app=WebAppInfo(url=p2_link))]
                     ]))
-                    await bot.send_message(ADMIN_ID, f"\U0001f3d3 Игра с пользователем #{user_anon_id} создана!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text="\U0001f3d3 Открыть игру", web_app=WebAppInfo(url=admin_link))]
+                    await bot.send_message(challenger_id, f"\U0001f3d3 Игра с пользователем #{target_anon_id} создана!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="\U0001f3d3 Открыть игру", web_app=WebAppInfo(url=p1_link))]
                     ]))
                 except Exception as e:
                     await message.answer(f"❌ Не удалось отправить приглашение: {e}")
-                return
-            else:
-                # Regular user challenges admin
-                anon_id = db.get_anon_id_by_user_id(challenger_id)
-                if not anon_id:
-                    await message.answer("❌ Ты не найден в базе.")
-                    return
-                accept_kb = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="✅ Принять", callback_data=f"pong_accept:{anon_id}"),
-                     InlineKeyboardButton(text="❌ Отклонить", callback_data=f"pong_decline:{anon_id}")]
-                ])
-                await bot.send_message(ADMIN_ID, f"\U0001f3d3 <b>Пинг-Понг!</b>\n\nПользователь #{anon_id} хочет сыграть с тобой!", reply_markup=accept_kb)
-                await message.answer("⏳ Ожидаем ответа от Cookie...")
             return
 
         # Game result
@@ -3168,9 +3159,14 @@ async def handle_game(request):
         return web.Response(status=404)
 
 async def handle_api_users(request):
-    users = db.get_all_users()
-    data = [{"id": u["id"], "name": u["first_name"] or f"#{u['id']}"} for u in users if u["id"] != 1]
-    return web.json_response(data)
+    try:
+        users = db.get_all_users()
+        exclude_uid = request.query.get("userId")
+        exclude_aid = db.get_anon_id_by_user_id(int(exclude_uid)) if exclude_uid else None
+        data = [{"id": u["id"], "name": u["first_name"] or f"#{u['id']}"} for u in users if u["id"] != exclude_aid]
+        return web.json_response(data)
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
 
 async def handle_websocket(request):
     ws = web.WebSocketResponse()

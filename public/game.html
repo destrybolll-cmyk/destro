@@ -187,7 +187,10 @@ document.getElementById('btnList').addEventListener('click',async()=>{
   backBtn.classList.remove('hidden');
   if(!usersCache){
     try{
-      const r=await fetch('/api/users');
+      const userId = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user.id : '';
+      const url = '/api/users' + (userId ? '?userId='+userId : '');
+      const r=await fetch(url);
+      if(!r.ok)throw new Error(r.status);
       usersCache=await r.json();
     }catch(e){
       userListEl.innerHTML='<div style="color:#f85149;padding:8px">Ошибка загрузки</div>';
