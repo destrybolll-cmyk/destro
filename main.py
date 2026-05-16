@@ -3160,12 +3160,12 @@ async def handle_game(request):
     try:
         with open(GAME_HTML_PATH, "rb") as f:
             data = f.read()
-        return web.Response(body=data, content_type="text/html; charset=utf-8")
+            return web.Response(body=data, content_type="text/html")
     except FileNotFoundError:
-        return web.Response(status=404)
+        return web.Response(status=404, text="file not found")
     except Exception as e:
-        logging.error(f"handle_game error: {e}")
-        return web.Response(status=500, text=str(e))
+        logging.error("handle_game error: %s", e)
+        return web.Response(status=500, text=f"game error: {e}")
 
 async def handle_api_users(request):
     try:
