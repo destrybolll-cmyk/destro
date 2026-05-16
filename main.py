@@ -2327,6 +2327,9 @@ async def handle_web_app_data(message: Message):
 
             if not target_anon_id:
                 # No target specified → challenge Cookie (admin)
+                if challenger_id == ADMIN_ID:
+                    await message.answer("❌ Ты не можешь играть против самого себя! Выбери пользователя из списка.")
+                    return
                 accept_kb = InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(text="✅ Принять", callback_data=f"pong_accept:{challenger_anon}"),
                      InlineKeyboardButton(text="❌ Отклонить", callback_data=f"pong_decline:{challenger_anon}")]
