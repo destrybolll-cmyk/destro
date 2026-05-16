@@ -1895,6 +1895,9 @@ async def _handle_callback(callback: CallbackQuery):
     elif action == "pong_challenge":
         await callback.answer()
         user_id = callback.from_user.id
+        if user_id == ADMIN_ID:
+            await callback.message.answer("❌ Ты не можешь играть против самого себя!")
+            return
         anon_id = db.get_anon_id_by_user_id(user_id)
         if not anon_id:
             await callback.message.answer("❌ Ты не найден в базе. Напиши боту любое сообщение.")

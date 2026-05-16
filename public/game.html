@@ -188,7 +188,8 @@ document.getElementById('btnList').addEventListener('click',async()=>{
   if(!usersCache){
     try{
       const userId = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user.id : '';
-      const url = '/api/users' + (userId ? '?userId='+userId : '');
+      const ts = Date.now();
+      const url = '/api/users' + (userId ? '?userId='+userId : '') + '?_='+ts;
       const r=await fetch(url);
       if(!r.ok)throw new Error(r.status);
       usersCache=await r.json();
