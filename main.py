@@ -3151,7 +3151,7 @@ async def broadcast_room(room_id: str, data: dict):
 
 # ────────── Web server (aiohttp) ─────────────────────────────
 
-GAME_HTML_PATH = os.path.join(os.path.dirname(__file__), "public", "game.html")
+GAME_HTML_PATH = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "public", "game.html"))
 
 async def handle_index(request):
     return web.Response(text="OK")
@@ -3163,6 +3163,9 @@ async def handle_game(request):
         return web.Response(body=data, content_type="text/html; charset=utf-8")
     except FileNotFoundError:
         return web.Response(status=404)
+    except Exception as e:
+        logging.error(f"handle_game error: {e}")
+        return web.Response(status=500, text=str(e))
 
 async def handle_api_users(request):
     try:
